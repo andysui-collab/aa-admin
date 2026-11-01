@@ -1,0 +1,15 @@
+{
+  "name": "aa-admin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "reconcile": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--no-warnings tsx src/cli/reconcile.ts",
+    "failed-payments": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--no-warnings tsx src/cli/failed-payments.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

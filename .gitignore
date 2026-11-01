@@ -1,0 +1,5 @@
+node_modules/
+.env
+# Contains student and parent personal data - never commit
+out/
+data/
