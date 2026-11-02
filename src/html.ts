@@ -42,6 +42,7 @@ export function renderPage(saved: Snapshot | null, { canReconcile, error }: Page
   --ok:#6fd3a0; --ok-bg:#163526; --over:#f2b65a; --over-bg:#3a2a10; --under:#f59a90; --under-bg:#3d1a17;
   --prepaid:#8cbcf2; --prepaid-bg:#152a42; --blank:#c2c2bb; --blank-bg:#2b2b28; --error-bg:#3d1a17; } }
 * { box-sizing:border-box; }
+[hidden] { display:none !important; }
 body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; }
 main { max-width:1100px; margin:0 auto; padding:24px 16px 64px; }
 h1 { font-size:24px; margin:0; } h2 { font-size:18px; margin:32px 0 6px; }
@@ -52,6 +53,11 @@ h1 { font-size:24px; margin:0; } h2 { font-size:18px; margin:32px 0 6px; }
 button, select, input { font:inherit; color:inherit; }
 .btn { background:var(--accent); color:var(--accent-text); border:0; border-radius:8px; padding:10px 16px; font-weight:600; cursor:pointer; }
 .btn:disabled { opacity:.6; cursor:wait; }
+.btn.small { padding:6px 12px; font-size:14px; } .btn.ghost { background:none; color:var(--text); border:1px solid var(--line); }
+.confirm { display:flex; gap:6px; flex-wrap:wrap; } .confirm select { max-width:320px; min-width:0; flex:1 1 200px; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 8px; }
+td.action { white-space:nowrap; } .done { color:var(--ok); font-weight:600; } .failed { color:var(--under); font-size:13px; white-space:normal; }
+.banner { position:sticky; bottom:12px; margin-top:20px; background:var(--accent); color:var(--accent-text); border-radius:10px; padding:12px 16px; display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+.banner .btn { background:var(--accent-text); color:var(--accent); }
 .error { background:var(--error-bg); color:var(--under); border-radius:8px; padding:10px 14px; margin:16px 0 0; }
 .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin:16px 0 12px; }
 .stat { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 14px; text-align:left; cursor:pointer; }
@@ -141,16 +147,33 @@ Date ranges cover the ${DATED_WEEKS} weeks up to the last reconcile (${esc(snaps
 </table></div>
 
 <h2>Live subscriptions with no Clients row</h2>
-<p class="hint">Being billed but not linked to the Clients tab. Add the match to the Stripe Links tab, or they may not be onboarded yet.</p>
-${simpleTable(["Stripe customer", "Email", "Customer ID", "Plan hrs/wk", "Hours billed", "$ billed", "First billed", "Last billed"],
-  snapshot.unmatchedLive.map((u) => [u.name, u.email, u.id, u.planHours, u.hoursBilled, money(u.amountBilled), u.firstBilled, u.lastBilled]))}
+<p class="hint">Being billed but not linked to the Clients tab. Match them from the list below, or press <strong>Ignore</strong> if they should never appear.</p>
+${snapshot.unmatchedLive.length ? `<div class="scroll"><table><thead><tr><th>Stripe customer</th><th>Customer ID</th><th class="num">Plan hrs/wk</th><th class="num">Hours billed</th><th class="num">$ billed</th><th>Billed</th>${canReconcile ? "<th></th>" : ""}</tr></thead><tbody>
+  ${snapshot.unmatchedLive.map((u) => `<tr><td>${esc(u.name)}<div class="sub">${esc(u.email)}</div></td><td><code>${esc(u.id)}</code></td>
+    <td class="num">${u.planHours}</td><td class="num">${u.hoursBilled}</td><td class="num">${money(u.amountBilled)}</td><td>${esc(u.firstBilled)} – ${esc(u.lastBilled)}</td>
+    ${canReconcile ? `<td class="action"><button type="button" class="btn small ghost" data-ignore="${esc(u.id)}" data-note="${esc(u.name)}">Ignore</button></td>` : ""}</tr>`).join("")}
+  </tbody></table></div>` : `<p class="empty">None.</p>`}
 
 <h2>Clients with no Stripe customer</h2>
-<p class="hint">To confirm a suggested match, copy its row into the Stripe Links tab (column A, column B).</p>
-${snapshot.unmatchedClients.length ? `<div class="scroll"><table><thead><tr><th>Students</th><th>Parent</th><th>Lessons</th><th>Suggested match</th><th>Stripe Links row</th></tr></thead><tbody>
-  ${snapshot.unmatchedClients.map((c) => `<tr><td>${esc(c.students)}</td><td>${esc(c.parent)}<div class="sub">${esc(c.parentEmail)}</div></td><td>${c.lessons}</td>
-    <td>${c.suggestion ? `${esc(c.suggestion.name)}<div class="sub">${esc(c.suggestion.email)}</div>` : "—"}</td>
-    <td>${c.suggestion ? `<code>${esc(c.parentEmail)}</code> <code>${esc(c.suggestion.id)}</code>` : "—"}</td></tr>`).join("")}
+<p class="hint">${canReconcile
+  ? "Pick the right Stripe customer and press <strong>Confirm</strong>: it's saved to the Stripe Links tab. Press <strong>Reconcile now</strong> afterwards to include them."
+  : "To confirm a match, add a row to the Stripe Links tab: column A the parent email, column B the customer ID."}</p>
+${snapshot.unmatchedClients.length ? `<div class="scroll"><table><thead><tr><th>Students</th><th>Parent</th><th class="num">Lessons</th><th>Stripe customer</th></tr></thead><tbody>
+  ${snapshot.unmatchedClients.map((c) => {
+    const options = [
+      ...(c.suggestion ? [{ id: c.suggestion.id, label: `Suggested: ${c.suggestion.name} <${c.suggestion.email}>` }] : []),
+      ...snapshot.unmatchedLive.filter((u) => u.id !== c.suggestion?.id).map((u) => ({ id: u.id, label: `${u.name} <${u.email}>` })),
+    ];
+    return `<tr><td>${esc(c.students)}</td><td>${esc(c.parent)}<div class="sub">${esc(c.parentEmail)}</div></td><td class="num">${c.lessons}</td>
+    <td class="action">${canReconcile ? `<div class="confirm">
+      <select aria-label="Stripe customer for ${esc(c.students)}">
+        ${options.length ? "" : `<option value="">No unmatched customers</option>`}
+        ${options.map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join("")}
+        <option value="other">Type an ID…</option>
+      </select>
+      <button type="button" class="btn small" data-confirm="${esc(c.parentEmail)}">Confirm</button>
+    </div>` : c.suggestion ? `${esc(c.suggestion.name)} <code>${esc(c.suggestion.id)}</code>` : "—"}</td></tr>`;
+  }).join("")}
   </tbody></table></div>` : `<p class="empty">None.</p>`}
 
 ${snapshot.unlinkedLessons.length ? `<h2>Tutor-sheet lessons not linked to a family</h2>
@@ -163,14 +186,50 @@ ${snapshot.issues.length ? `<h2>Clients tab issues</h2>${simpleTable(["Row", "St
 ` : `<p class="empty" style="margin-top:24px">${outdated
   ? "The app has been updated since the last reconciliation. Press <strong>Reconcile now</strong> to refresh it."
   : "No reconciliation saved yet. Press <strong>Reconcile now</strong> to run the first one."}</p>`}
+${canReconcile ? `<div class="banner" id="banner" hidden><span id="banner-text"></span>
+  <form method="post" action="/api/reconcile"><button class="btn small" type="submit">Reconcile now</button></form></div>` : ""}
 </main>
 <script type="application/json" id="data">${data}</script>
 <script>
 (() => {
-  const form = document.getElementById("reconcile-form");
-  if (form) form.addEventListener("submit", () => {
-    const btn = document.getElementById("reconcile-btn");
+  document.querySelectorAll('form[action="/api/reconcile"]').forEach((form) => form.addEventListener("submit", () => {
+    const btn = form.querySelector("button");
     btn.disabled = true; btn.textContent = "Reconciling… (about 20 seconds)";
+  }));
+
+  // Confirm / Ignore buttons: save a row to the Stripe Links tab, then mark the row as done.
+  let saved = 0;
+  async function saveLink(button, familyKey, customerIds, note) {
+    button.disabled = true;
+    const cell = button.closest("td");
+    cell.querySelector(".failed")?.remove();
+    try {
+      const res = await fetch("/api/links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ familyKey, customerIds, note }) });
+      const result = await res.json().catch(() => ({ ok: false, error: "Unexpected response (" + res.status + ")" }));
+      if (!result.ok) throw new Error(result.error || "Couldn't save");
+      cell.innerHTML = '<span class="done">✓ Saved</span>';
+      saved++;
+      document.getElementById("banner").hidden = false;
+      document.getElementById("banner-text").textContent = saved + " change" + (saved > 1 ? "s" : "") + " saved to the Stripe Links tab. Reconcile to include " + (saved > 1 ? "them" : "it") + ".";
+    } catch (err) {
+      button.disabled = false;
+      cell.insertAdjacentHTML("beforeend", '<div class="failed"></div>');
+      cell.querySelector(".failed").textContent = err.message;
+    }
+  }
+  document.addEventListener("click", (e) => {
+    const confirmBtn = e.target.closest("[data-confirm]");
+    if (confirmBtn) {
+      const select = confirmBtn.closest(".confirm").querySelector("select");
+      let id = select.value;
+      if (id === "other") id = (prompt("Stripe customer ID (starts with cus_). For several, separate with ;") || "").trim();
+      if (!id) return;
+      saveLink(confirmBtn, confirmBtn.dataset.confirm, id, "");
+    }
+    const ignoreBtn = e.target.closest("[data-ignore]");
+    if (ignoreBtn && confirm("Hide " + ignoreBtn.dataset.note + " from the report from now on?")) {
+      saveLink(ignoreBtn, "ignore", ignoreBtn.dataset.ignore, ignoreBtn.dataset.note);
+    }
   });
 
   const table = document.getElementById("accounts");

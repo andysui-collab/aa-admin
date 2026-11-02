@@ -4,7 +4,7 @@ Internal admin tooling for the tutoring business. The owner is new to coding: ex
 
 ## What's here
 - **Website** (Vercel): `api/index.ts` shows the last saved reconciliation at `/` (loads instantly; period selection, filtering, sorting and search run in the browser from the saved data). All time = Clients tab O+P vs all billing; date ranges (within the `DATED_WEEKS` = 12 weeks before the last reconcile) = tutor-sheet lessons vs Stripe items dated in the range. The "Reconcile now" button POSTs to `api/reconcile.ts`, which re-runs it and saves the result in Upstash Redis (`src/store.ts`; `KV_REST_API_URL`/`KV_REST_API_TOKEN` are set by Vercel's Storage integration). Protected by a bookmark link: `/?key=<SITE_PASSWORD>` sets a cookie for a year; everyone else gets a 404. `api/failed-payments.ts` runs daily (cron in `vercel.json`) and POSTs failed payments from the last 24h to the n8n webhook in `N8N_WEBHOOK_URL`, which texts the owner. Quiet days send nothing.
-- Vercel environment variables: `STRIPE_API_KEY` (restricted, read-only), `SITE_PASSWORD`, `CRON_SECRET`, `N8N_WEBHOOK_URL`.
+- Vercel environment variables: `STRIPE_API_KEY` (restricted, read-only), `SITE_PASSWORD`, `CRON_SECRET`, `N8N_WEBHOOK_URL`, `APPS_SCRIPT_URL`, `APPS_SCRIPT_SECRET`.
 - `npm run reconcile`: same report locally. Writes `out/report.html`, `out/billing-events.csv`, `out/matches.csv`.
 - `npm run failed-payments`: prints failed payments from the last 24h. Prints nothing if there were none.
 
@@ -17,7 +17,7 @@ Internal admin tooling for the tutoring business. The owner is new to coding: ex
 - `src/report.ts` builds the report; `src/snapshot.ts` turns it into plain JSON for saving; `src/html.ts` renders a snapshot (shared by the CLI and the website).
 
 ## Rules
-- Stripe access is **read-only**. Never write to Stripe or the sheets.
+- Stripe access is **read-only**. Never write to Stripe. The only sheet write is adding/replacing rows in the Stripe Links tab, via the Apps Script web app in `apps-script/StripeLinks.gs` (bound to the master sheet, checks a shared secret), called by `api/links.ts` for the Confirm/Ignore buttons.
 - `out/` and `data/` contain children's and parents' personal data. They are gitignored; never commit them or publish them anywhere.
 - In the Claude cloud environment the network proxy adds the Stripe key. Elsewhere, set `STRIPE_API_KEY`. Node's fetch needs `NODE_USE_ENV_PROXY=1` here (already in the npm scripts).
 - Run `npm run typecheck` after changes.
