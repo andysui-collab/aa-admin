@@ -3,6 +3,7 @@
 
 import type { Account } from "./accounts.js";
 import type { BillingEvent } from "./billing.js";
+import { DATED_WEEKS, TIMEZONE } from "./config.js";
 import type { ClientIssue, Lesson, LessonIssue } from "./sheets.js";
 import { accountName, accountStudents, familyLessons, type Report } from "./report.js";
 
@@ -29,8 +30,10 @@ export interface AccountRow {
 
 export interface Snapshot {
   reconciledAt: string; // ISO timestamp
+  asOf: string; // reconcile date, YYYY-MM-DD in local time
+  datedFrom: string; // first day covered by the date-range views (DATED_WEEKS back from asOf)
   accounts: AccountRow[];
-  unmatchedLive: { name: string; email: string; planHours: number; hoursBilled: number; amountBilled: number; firstBilled: string; lastBilled: string }[];
+  unmatchedLive: { id: string; name: string; email: string; planHours: number; hoursBilled: number; amountBilled: number; firstBilled: string; lastBilled: string }[];
   unmatchedClients: { parentEmail: string; parent: string; students: string; lessons: number; suggestion: { name: string; email: string; id: string } | null }[];
   issues: ClientIssue[];
   unlinkedLessons: Pick<Lesson, "date" | "hours" | "tutor" | "student" | "subject" | "parentEmail">[];
@@ -38,8 +41,17 @@ export interface Snapshot {
 }
 
 export function toSnapshot(report: Report): Snapshot {
+  const now = new Date();
+  const asOf = new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE }).format(now);
+  const start = new Date(asOf + "T00:00:00Z");
+  start.setUTCDate(start.getUTCDate() - (DATED_WEEKS * 7 - 1));
+  const datedFrom = start.toISOString().slice(0, 10);
+  const inWindow = (l: { date: string }) => l.date >= datedFrom && l.date <= asOf;
+
   return {
-    reconciledAt: new Date().toISOString(),
+    reconciledAt: now.toISOString(),
+    asOf,
+    datedFrom,
     accounts: report.accounts.map((a) => ({
       status: a.status,
       students: accountStudents(a),
@@ -56,14 +68,14 @@ export function toSnapshot(report: Report): Snapshot {
       unconverted: a.unconvertedAmount,
       lastBilled: a.lastBilled,
       hasProgram: a.hasProgram,
-      dated: (report.lessonsByAccount.get(a) ?? []).sort((x, y) => x.date.localeCompare(y.date))
+      dated: (report.lessonsByAccount.get(a) ?? []).filter(inWindow).sort((x, y) => x.date.localeCompare(y.date))
         .map(({ date, hours, tutor, student, subject }) => ({ date, hours, tutor, student, subject })),
       lessons: a.families.flatMap((f) => f.clients).map((c) => ({ student: c.studentName, maths: c.maths, english: c.english, row: c.row })),
       events: [...a.events].sort((x, y) => x.date.localeCompare(y.date))
         .map(({ date, kind, description, amount, hours }) => ({ date, kind, description, amount, hours })),
     })),
     unmatchedLive: report.unmatchedLiveCustomers.map((u) => ({
-      name: u.customer.name, email: u.customer.email, planHours: u.customer.weeklyPlanHours,
+      id: u.customer.id, name: u.customer.name, email: u.customer.email, planHours: u.customer.weeklyPlanHours,
       hoursBilled: u.hoursBilled, amountBilled: u.amountBilled, firstBilled: u.firstBilled, lastBilled: u.lastBilled,
     })),
     unmatchedClients: report.unmatchedClients.map((m) => ({
@@ -74,7 +86,7 @@ export function toSnapshot(report: Report): Snapshot {
       suggestion: m.suggestion ? { name: m.suggestion.customer.name, email: m.suggestion.customer.email, id: m.suggestion.customer.id } : null,
     })),
     issues: report.issues,
-    unlinkedLessons: report.unlinkedLessons.map(({ date, hours, tutor, student, subject, parentEmail }) => ({ date, hours, tutor, student, subject, parentEmail })),
+    unlinkedLessons: report.unlinkedLessons.filter(inWindow).map(({ date, hours, tutor, student, subject, parentEmail }) => ({ date, hours, tutor, student, subject, parentEmail })),
     lessonIssues: report.lessonIssues,
   };
 }

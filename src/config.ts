@@ -55,3 +55,6 @@ export const TRIAL_COUNTS_AS_BILLED = false;
 // Billing and lessons happen on different days of the week, so a balance within
 // this many weeks' worth of the family's plan is normal timing, not a problem.
 export const TOLERANCE_WEEKS = 1;
+
+// The date-range views (past 2/4 weeks, custom) cover this many weeks back from the last reconcile.
+export const DATED_WEEKS = 12;

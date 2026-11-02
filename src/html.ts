@@ -1,7 +1,7 @@
 // Renders a saved reconciliation as a single self-contained HTML page (no external files).
 // Filtering, searching and sorting happen in the browser, using the data embedded in the page.
 
-import { START_DATE, TIMEZONE, TOLERANCE_WEEKS } from "./config.js";
+import { DATED_WEEKS, START_DATE, TIMEZONE, TOLERANCE_WEEKS } from "./config.js";
 import type { Snapshot } from "./snapshot.js";
 
 const esc = (v: unknown) =>
@@ -19,9 +19,12 @@ export interface PageOptions {
   error?: string;
 }
 
-export function renderPage(snapshot: Snapshot | null, { canReconcile, error }: PageOptions): string {
-  const reconciled = snapshot
-    ? new Date(snapshot.reconciledAt).toLocaleString("en-AU", { timeZone: TIMEZONE, weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })
+export function renderPage(saved: Snapshot | null, { canReconcile, error }: PageOptions): string {
+  // A result saved by an older version of the app lacks the date-range fields: ask for a fresh reconcile.
+  const outdated = saved !== null && !saved.asOf;
+  const snapshot = outdated ? null : saved;
+  const reconciled = saved
+    ? new Date(saved.reconciledAt).toLocaleString("en-AU", { timeZone: TIMEZONE, weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })
     : null;
   // Embedded as JSON for the browser script; "<" is escaped so the data can't close the <script> tag.
   const data = JSON.stringify(snapshot?.accounts ?? []).replace(/</g, "\\u003c");
@@ -98,13 +101,13 @@ ${snapshot ? `
     <button type="button" data-period="all">All time</button><button type="button" data-period="2w">Past 2 weeks</button><button type="button" data-period="4w">Past 4 weeks</button><button type="button" data-period="custom">Custom dates</button>
   </div>
   <div class="custom" id="custom" hidden>
-    <label>From <input type="date" id="from"></label>
-    <label>To <input type="date" id="to"></label>
+    <label>From <input type="date" id="from" min="${esc(snapshot.datedFrom)}" max="${esc(snapshot.asOf)}"></label>
+    <label>To <input type="date" id="to" min="${esc(snapshot.datedFrom)}" max="${esc(snapshot.asOf)}"></label>
   </div>
 </div>
 <p class="lede" id="lede"></p>
 <p class="lede">Positive balance = paid for lessons not yet had. Balances within one week of a family's plan count as normal billing timing (OK).
-Date ranges use data as of the last reconcile.</p>
+Date ranges cover the ${DATED_WEEKS} weeks up to the last reconcile (${esc(snapshot.datedFrom)} to ${esc(snapshot.asOf)}).</p>
 <div class="stats" id="stats"></div>
 <div class="toolbar">
   <input type="search" id="search" placeholder="Search student, parent or email" aria-label="Search">
@@ -122,7 +125,7 @@ Date ranges use data as of the last reconcile.</p>
   </select>
 </div>
 <p class="count" id="count"></p>
-<div class="scroll"><table id="accounts" data-tolerance-weeks="${TOLERANCE_WEEKS}" data-timezone="${esc(TIMEZONE)}" data-start-date="${esc(START_DATE)}">
+<div class="scroll"><table id="accounts" data-tolerance-weeks="${TOLERANCE_WEEKS}" data-start-date="${esc(START_DATE)}" data-as-of="${esc(snapshot.asOf)}" data-dated-from="${esc(snapshot.datedFrom)}">
   <thead><tr>
     <th data-sort="status">Status<span class="arrow"></span></th>
     <th data-sort="students">Family<span class="arrow"></span></th>
@@ -139,8 +142,8 @@ Date ranges use data as of the last reconcile.</p>
 
 <h2>Live subscriptions with no Clients row</h2>
 <p class="hint">Being billed but not linked to the Clients tab. Add the match to the Stripe Links tab, or they may not be onboarded yet.</p>
-${simpleTable(["Stripe customer", "Email", "Plan hrs/wk", "Hours billed", "$ billed", "First billed", "Last billed"],
-  snapshot.unmatchedLive.map((u) => [u.name, u.email, u.planHours, u.hoursBilled, money(u.amountBilled), u.firstBilled, u.lastBilled]))}
+${simpleTable(["Stripe customer", "Email", "Customer ID", "Plan hrs/wk", "Hours billed", "$ billed", "First billed", "Last billed"],
+  snapshot.unmatchedLive.map((u) => [u.name, u.email, u.id, u.planHours, u.hoursBilled, money(u.amountBilled), u.firstBilled, u.lastBilled]))}
 
 <h2>Clients with no Stripe customer</h2>
 <p class="hint">To confirm a suggested match, copy its row into the Stripe Links tab (column A, column B).</p>
@@ -157,7 +160,9 @@ ${simpleTable(["Date", "Student", "Subject", "Tutor", "Hours", "Parent email"], 
 ${snapshot.lessonIssues.length ? `<h2>Tutor sheet issues</h2>${simpleTable(["Tutor", "Row", "Problem"], snapshot.lessonIssues.map((i) => [i.tutor, i.row, i.problem]))}` : ""}
 
 ${snapshot.issues.length ? `<h2>Clients tab issues</h2>${simpleTable(["Row", "Student", "Problem"], snapshot.issues.map((i) => [i.row, i.student, i.problem]))}` : ""}
-` : `<p class="empty" style="margin-top:24px">No reconciliation saved yet. Press <strong>Reconcile now</strong> to run the first one.</p>`}
+` : `<p class="empty" style="margin-top:24px">${outdated
+  ? "The app has been updated since the last reconciliation. Press <strong>Reconcile now</strong> to refresh it."
+  : "No reconciliation saved yet. Press <strong>Reconcile now</strong> to run the first one."}</p>`}
 </main>
 <script type="application/json" id="data">${data}</script>
 <script>
@@ -172,7 +177,6 @@ ${snapshot.issues.length ? `<h2>Clients tab issues</h2>${simpleTable(["Row", "St
   if (!table) return;
   const accounts = JSON.parse(document.getElementById("data").textContent);
   const TOLERANCE_WEEKS = Number(table.dataset.toleranceWeeks);
-  const TIMEZONE = table.dataset.timezone;
   const STATUSES = [
     ["attention", "Needs attention", ""], ["Overbilled", "Overbilled", "over"], ["Underbilled", "Underbilled", "under"],
     ["Prepaid program", "Prepaid program", "prepaid"], ["No lessons in Clients tab", "No lessons in Clients tab", ""],
@@ -189,7 +193,10 @@ ${snapshot.issues.length ? `<h2>Clients tab issues</h2>${simpleTable(["Row", "St
   const matchesStatus = (a, s) => s === "all" || (s === "attention" ? a.status !== "OK" : a.status === s);
 
   // Dates are YYYY-MM-DD strings in Melbourne time, so they compare correctly as text.
-  const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE }).format(new Date());
+  // Periods are counted back from the reconcile date (the newest data saved), within the saved window.
+  const AS_OF = table.dataset.asOf, DATED_FROM = table.dataset.datedFrom;
+  const today = () => AS_OF;
+  const clamp = (iso) => iso < DATED_FROM ? DATED_FROM : iso > AS_OF ? AS_OF : iso;
   const addDays = (iso, days) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
   const prettyDate = (iso) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-AU", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
   function range() {
@@ -239,7 +246,8 @@ ${snapshot.issues.length ? `<h2>Clients tab issues</h2>${simpleTable(["Row", "St
     render();
   });
   [fromInput, toInput].forEach((input) => input.addEventListener("change", () => {
-    state.from = fromInput.value; state.to = toInput.value;
+    state.from = fromInput.value = clamp(fromInput.value || DATED_FROM);
+    state.to = toInput.value = clamp(toInput.value || AS_OF);
     if (state.from && state.to && state.from > state.to) [state.from, state.to] = [state.to, state.from];
     render();
   }));
