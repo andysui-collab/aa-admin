@@ -13,6 +13,7 @@ export const MASTER_CLIENTS_GID = "353391691";
 export const PRICE_HOURS: Record<string, number> = {
   price_1UWtydE3ALJUDeBodBY85BSJ: 1, // $75/wk, product named "Maths and English Program", but 1 lesson
   price_1TwgaYE3ALJUDeBoIrOUfU8A: 1, // $65/wk, product named "Standard Tutoring Plan (2x a week)", but 1 lesson
+  price_1TSF9cE3ALJUDeBoLJtdtYOq: 1, // $60/wk "Additional Lesson (1x a week)" is a full hour ($30 and $40 are half hours)
 };
 
 // Hours per unit, matched against the product name (or line description). First match wins.
@@ -29,8 +30,9 @@ export const NAME_RULES: [RegExp, number | null][] = [
   [/risk-free|1x a week|single subject|special needs/i, 1],
 ];
 
-// A $0 "Trial period" invoice still covers that week's lessons (the free first week).
-export const TRIAL_COUNTS_AS_BILLED = true;
+// The $0 "Trial period" invoice only delays the first charge until after the first lesson;
+// it doesn't pay for a lesson (there are no free first lessons).
+export const TRIAL_COUNTS_AS_BILLED = false;
 
 // Billing and lessons happen on different days of the week, so a balance within
 // this many weeks' worth of the family's plan is normal timing, not a problem.
