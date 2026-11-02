@@ -1,34 +1,24 @@
-// Reads the master sheet and every tutor's tracker via their public CSV export links.
+// Reads the Clients tab of the master sheet via its public CSV export link.
+// Lessons delivered = column O (Total Maths) + column P (Total English). When a student
+// switches tutors, lessons with the previous tutor are added to these counts by hand.
 
 import { MASTER_CLIENTS_GID, MASTER_SHEET_ID } from "./config.js";
 
-export interface Lesson {
-  tutor: string;
-  date: string; // YYYY-MM-DD
-  student: string;
-  subject: string; // "Maths" or "English"
-  hours: number;
-  parentName: string;
-  parentEmail: string; // lowercased, may be empty
-}
-
 export interface Client {
+  row: number; // sheet row number, for finding it again
   studentName: string;
   studentEmail: string;
   parentName: string;
-  parentEmail: string;
-  totalMaths: string;
-  totalEnglish: string;
+  parentEmail: string; // lowercased, may be empty
+  maths: number;
+  english: number;
 }
 
-async function fetchText(url: string): Promise<string> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`GET ${url} failed: ${res.status}`);
-  return res.text();
+export interface ClientIssue {
+  row: number;
+  student: string;
+  problem: string;
 }
-
-const csvUrl = (sheetId: string, gid: string) =>
-  `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
 
 // Small RFC 4180 CSV parser (handles quoted fields with commas and newlines).
 export function parseCsv(text: string): string[][] {
@@ -53,76 +43,36 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
-// dd/mm/yyyy -> yyyy-mm-dd
-function toIsoDate(ddmmyyyy: string): string | null {
-  const m = ddmmyyyy.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : null;
-}
+export async function fetchClients(): Promise<{ clients: Client[]; issues: ClientIssue[] }> {
+  const url = `https://docs.google.com/spreadsheets/d/${MASTER_SHEET_ID}/export?format=csv&gid=${MASTER_CLIENTS_GID}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Couldn't read the Clients tab: ${res.status}`);
+  const rows = parseCsv(await res.text());
 
-export async function fetchClients(): Promise<Client[]> {
-  const rows = parseCsv(await fetchText(csvUrl(MASTER_SHEET_ID, MASTER_CLIENTS_GID)));
-  return rows.slice(1).filter((r) => r[1]?.trim() || r[4]?.trim()).map((r) => ({
-    studentName: r[1].trim(),
-    studentEmail: r[2].trim().toLowerCase(),
-    parentName: r[3].trim(),
-    parentEmail: r[4].trim().toLowerCase(),
-    totalMaths: r[14].trim(),
-    totalEnglish: r[15].trim(),
-  }));
-}
-
-async function fetchTutors(): Promise<{ name: string; sheetId: string }[]> {
-  const url = `https://docs.google.com/spreadsheets/d/${MASTER_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Tutors`;
-  const rows = parseCsv(await fetchText(url));
-  return rows.slice(1).flatMap((r) => {
-    const sheetId = r[4]?.match(/\/d\/([^/]+)/)?.[1];
-    return sheetId ? [{ name: r[1].trim() || r[0].trim(), sheetId }] : [];
+  const clients: Client[] = [];
+  const issues: ClientIssue[] = [];
+  rows.forEach((r, i) => {
+    if (i === 0 || !(r[1]?.trim() || r[4]?.trim())) return;
+    const row = i + 1;
+    const student = r[1].trim();
+    const count = (cell: string | undefined, column: string) => {
+      const value = (cell ?? "").trim();
+      if (!value) return 0;
+      const n = Number(value);
+      if (Number.isNaN(n)) { issues.push({ row, student, problem: `column ${column} isn't a number: "${value}"` }); return 0; }
+      return n;
+    };
+    const client: Client = {
+      row,
+      studentName: student,
+      studentEmail: (r[2] ?? "").trim().toLowerCase(),
+      parentName: (r[3] ?? "").trim(),
+      parentEmail: (r[4] ?? "").trim().toLowerCase(),
+      maths: count(r[14], "O"),
+      english: count(r[15], "P"),
+    };
+    if (!client.parentEmail) issues.push({ row, student, problem: "missing parent email" });
+    clients.push(client);
   });
-}
-
-// Finds the gid of the "Sessions" tab from the sheet's public HTML view.
-async function findSessionsGid(sheetId: string): Promise<string> {
-  const html = await fetchText(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`);
-  const gid = html.match(/name: "Sessions", pageUrl: "[^"]*gid=(\d+)/)?.[1];
-  if (!gid) throw new Error(`No "Sessions" tab found in tutor sheet ${sheetId}`);
-  return gid;
-}
-
-export interface LessonIssue {
-  tutor: string;
-  row: string;
-  problem: string;
-}
-
-export async function fetchLessons(): Promise<{ lessons: Lesson[]; issues: LessonIssue[] }> {
-  const tutors = await fetchTutors();
-  const lessons: Lesson[] = [];
-  const issues: LessonIssue[] = [];
-  const today = new Date().toISOString().slice(0, 10);
-
-  await Promise.all(tutors.map(async (tutor) => {
-    const rows = parseCsv(await fetchText(csvUrl(tutor.sheetId, await findSessionsGid(tutor.sheetId))));
-    const headerIdx = rows.findIndex((r) => r[0]?.startsWith("Date"));
-    for (const r of rows.slice(headerIdx + 1)) {
-      if (!r[0]?.trim()) continue;
-      const label = `${r[0]} ${r[1]} ${r[2]}`;
-      const date = toIsoDate(r[0]);
-      const hours = parseFloat(r[3]);
-      if (!date) { issues.push({ tutor: tutor.name, row: label, problem: "unreadable date" }); continue; }
-      if (date > today) issues.push({ tutor: tutor.name, row: label, problem: "date is in the future" });
-      if (!(hours > 0)) issues.push({ tutor: tutor.name, row: label, problem: "missing lesson length, assumed 1 hr" });
-      if (!r[9]?.trim()) issues.push({ tutor: tutor.name, row: label, problem: "missing parent email" });
-      lessons.push({
-        tutor: tutor.name,
-        date,
-        student: r[1].trim(),
-        // Tutors log "Maths Methods", "General Maths" etc. - all count as Maths.
-        subject: /math/i.test(r[2]) ? "Maths" : r[2].trim(),
-        hours: hours > 0 ? hours : 1,
-        parentName: (r[8] ?? "").trim(),
-        parentEmail: (r[9] ?? "").trim().toLowerCase(),
-      });
-    }
-  }));
-  return { lessons, issues };
+  return { clients, issues };
 }
