@@ -20,6 +20,7 @@ export interface Account {
   balance: number;
   unconvertedAmount: number; // dollars we couldn't turn into hours
   status: "OK" | "Overbilled" | "Prepaid program" | "Underbilled" | "No lessons in Clients tab";
+  hasProgram: boolean; // paid for a prepaid program/package at some point
   lastBilled: string | null;
 }
 
@@ -68,7 +69,7 @@ export function buildAccounts(matches: Match[], customers: Map<string, Customer>
     // Billing and lessons fall on different days, so a gap within one week of the plan is normal timing.
     // Any single payment of $1,000+ is treated as a prepaid program/package.
     const tolerance = Math.max(account.weeklyPlanHours, 1) * TOLERANCE_WEEKS;
-    const hasProgram = events.some((e) => /transformation|package/i.test(e.description) || e.amount >= 1000);
+    const hasProgram = account.hasProgram = events.some((e) => /transformation|package/i.test(e.description) || e.amount >= 1000);
     // Blank maths/English counts usually mean the Clients tab hasn't been filled in, not overbilling.
     account.status = account.deliveredHours === 0 && account.billedHours > 0 ? "No lessons in Clients tab"
       : account.balance > tolerance ? (hasProgram ? "Prepaid program" : "Overbilled")

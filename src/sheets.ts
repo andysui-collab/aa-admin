@@ -1,8 +1,10 @@
-// Reads the Clients tab of the master sheet via its public CSV export link.
-// Lessons delivered = column O (Total Maths) + column P (Total English). When a student
-// switches tutors, lessons with the previous tutor are added to these counts by hand.
+// Reads the master sheet and tutor trackers via their public CSV export links.
+// - Clients tab: all-time lessons delivered = column O (Total Maths) + column P (Total English).
+//   When a student switches tutors, lessons with the previous tutor are added to these by hand.
+// - Each tutor's "Sessions" tab (listed in the Tutors tab, column E): one dated row per lesson,
+//   used for the date-range views.
 
-import { MASTER_CLIENTS_GID, MASTER_SHEET_ID } from "./config.js";
+import { MASTER_CLIENTS_GID, MASTER_SHEET_ID, TIMEZONE } from "./config.js";
 
 export interface Client {
   row: number; // sheet row number, for finding it again
@@ -44,10 +46,7 @@ export function parseCsv(text: string): string[][] {
 }
 
 export async function fetchClients(): Promise<{ clients: Client[]; issues: ClientIssue[] }> {
-  const url = `https://docs.google.com/spreadsheets/d/${MASTER_SHEET_ID}/export?format=csv&gid=${MASTER_CLIENTS_GID}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Couldn't read the Clients tab: ${res.status}`);
-  const rows = parseCsv(await res.text());
+  const rows = parseCsv(await fetchText(csvUrl(MASTER_SHEET_ID, MASTER_CLIENTS_GID)));
 
   const clients: Client[] = [];
   const issues: ClientIssue[] = [];
@@ -75,4 +74,88 @@ export async function fetchClients(): Promise<{ clients: Client[]; issues: Clien
     clients.push(client);
   });
   return { clients, issues };
+}
+
+export interface Lesson {
+  tutor: string;
+  date: string; // YYYY-MM-DD
+  student: string;
+  subject: string; // "Maths" or "English"
+  hours: number;
+  parentEmail: string; // lowercased, may be empty
+}
+
+export interface LessonIssue {
+  tutor: string;
+  row: string;
+  problem: string;
+}
+
+async function fetchText(url: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Couldn't read ${url}: ${res.status}`);
+  return res.text();
+}
+
+const csvUrl = (sheetId: string, gid: string) =>
+  `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+
+// dd/mm/yyyy -> yyyy-mm-dd
+function toIsoDate(ddmmyyyy: string): string | null {
+  const m = ddmmyyyy.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : null;
+}
+
+async function fetchTutors(): Promise<{ name: string; sheetId: string }[]> {
+  const url = `https://docs.google.com/spreadsheets/d/${MASTER_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Tutors`;
+  return parseCsv(await fetchText(url)).slice(1).flatMap((r) => {
+    const sheetId = r[4]?.match(/\/d\/([^/]+)/)?.[1];
+    return sheetId ? [{ name: r[1]?.trim() || r[0].trim(), sheetId }] : [];
+  });
+}
+
+// Finds the gid of the "Sessions" tab from the sheet's public HTML view.
+async function findSessionsGid(sheetId: string): Promise<string> {
+  const html = await fetchText(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`);
+  const gid = html.match(/name: "Sessions", pageUrl: "[^"]*gid=(\d+)/)?.[1];
+  if (!gid) throw new Error(`No "Sessions" tab found in tutor sheet ${sheetId}`);
+  return gid;
+}
+
+// Tutor "Sessions" columns: A date (dd/mm/yyyy), B student, C subject, D hours, ..., J parent email.
+export async function fetchLessons(): Promise<{ lessons: Lesson[]; issues: LessonIssue[] }> {
+  const tutors = await fetchTutors();
+  const lessons: Lesson[] = [];
+  const issues: LessonIssue[] = [];
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE }).format(new Date());
+
+  await Promise.all(tutors.map(async (tutor) => {
+    let rows: string[][];
+    try {
+      rows = parseCsv(await fetchText(csvUrl(tutor.sheetId, await findSessionsGid(tutor.sheetId))));
+    } catch (err) {
+      issues.push({ tutor: tutor.name, row: "whole sheet", problem: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+    const headerIdx = rows.findIndex((r) => r[0]?.startsWith("Date"));
+    for (const r of rows.slice(headerIdx + 1)) {
+      if (!r[0]?.trim()) continue;
+      const label = `${r[0]} ${r[1]} ${r[2]}`;
+      const date = toIsoDate(r[0]);
+      const hours = parseFloat(r[3]);
+      if (!date) { issues.push({ tutor: tutor.name, row: label, problem: "unreadable date" }); continue; }
+      if (date > today) issues.push({ tutor: tutor.name, row: label, problem: "date is in the future" });
+      if (!(hours > 0)) issues.push({ tutor: tutor.name, row: label, problem: "missing lesson length, assumed 1 hr" });
+      lessons.push({
+        tutor: tutor.name,
+        date,
+        student: (r[1] ?? "").trim(),
+        // Tutors log "Maths Methods", "General Maths" etc. - all count as Maths.
+        subject: /math/i.test(r[2] ?? "") ? "Maths" : (r[2] ?? "").trim(),
+        hours: hours > 0 ? hours : 1,
+        parentEmail: (r[9] ?? "").trim().toLowerCase(),
+      });
+    }
+  }));
+  return { lessons, issues };
 }
