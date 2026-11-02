@@ -31,7 +31,7 @@ export interface Account {
   deliveredHours: number;
   balance: number;
   unconvertedAmount: number; // dollars we couldn't turn into hours
-  status: "OK" | "Overbilled" | "Underbilled";
+  status: "OK" | "Overbilled" | "Prepaid program" | "Underbilled";
   lastLesson: string | null;
   lastBilled: string | null;
 }
@@ -107,7 +107,11 @@ export function buildAccounts(matches: Match[], customers: Map<string, Customer>
     account.unconvertedAmount = round(account.unconvertedAmount);
 
     const tolerance = Math.max(account.weeklyPlanHours, 1) * TOLERANCE_WEEKS;
-    account.status = account.balance > tolerance ? "Overbilled" : account.balance < -tolerance ? "Underbilled" : "OK";
+    // Hours left on a prepaid program/package aren't overbilling, but still worth seeing.
+    // Any single payment of $1,000+ is treated as a package.
+    const hasProgram = events.some((e) => /transformation|package/i.test(e.description) || e.amount >= 1000);
+    account.status = account.balance > tolerance ? (hasProgram ? "Prepaid program" : "Overbilled")
+      : account.balance < -tolerance ? "Underbilled" : "OK";
     account.lastLesson = lessons.map((l) => l.date).sort().at(-1) ?? null;
     account.lastBilled = events.filter((e) => e.amount > 0).map((e) => e.date).sort().at(-1) ?? null;
   }

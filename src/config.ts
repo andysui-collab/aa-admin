@@ -21,7 +21,15 @@ export const PRICE_HOURS: Record<string, number> = {
 export const PROGRAM_DOLLARS_PER_HOUR: [RegExp, number][] = [
   [/transformation program \(advanced\)/i, 3200 / 40],
   [/transformation program \(standard\)/i, 1800 / 20],
+  [/transformation program \(maths? & english\) - 4x \$750/i, 3000 / 40],
+  [/transformation program \(maths? & english\) - 4x \$800/i, 3200 / 40],
 ];
+
+// Payments made without an invoice (e.g. payment links) have no product attached.
+// Hours come from a number in the description ("8 owed sessions"), else from this table by amount.
+export const ONE_OFF_PAYMENT_HOURS: Record<number, number> = {
+  1800: 20, // 20-hour package
+};
 
 // Hours per unit, matched against the product name (or line description). First match wins.
 // null = we can't convert this to hours; the dollars are shown for manual review instead.

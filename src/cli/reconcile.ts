@@ -64,7 +64,7 @@ writeFileSync("out/ledger.csv", toCsv([
 // --- summary.md
 const flagged = accounts.filter((a) => a.status !== "OK").sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance));
 const accountRow = (a: (typeof accounts)[number]) => [
-  a.customers.map((c) => c.name || c.email).join(" / "),
+  a.status, a.customers.map((c) => c.name || c.email).join(" / "),
   [...new Set(a.families.flatMap((f) => [...f.students]))].join(", "),
   a.weeklyPlanHours || "none live",
   a.billedHours, a.creditedHours, a.deliveredHours, `**${fmtH(a.balance)}**`,
@@ -72,7 +72,7 @@ const accountRow = (a: (typeof accounts)[number]) => [
   a.unconvertedAmount ? `$${a.unconvertedAmount}` : "",
   a.lastLesson, a.lastBilled,
 ];
-const accountHeader = ["Stripe customer", "Students", "Plan hrs/wk", "Billed", "Refunded", "Delivered", "Balance (hrs)", "≈ $", "Needs review $", "Last lesson", "Last billed"];
+const accountHeader = ["Status", "Stripe customer", "Students", "Plan hrs/wk", "Billed", "Refunded", "Delivered", "Balance (hrs)", "≈ $", "Needs review $", "Last lesson", "Last billed"];
 const count = (method: string) => matches.filter((m) => m.method === method).length;
 
 const summary = `# Billing reconciliation — ${today()}

@@ -1,6 +1,6 @@
 // Turns Stripe invoices, refunds and credits into "billing events" measured in lesson hours.
 
-import { NAME_RULES, PRICE_HOURS, PROGRAM_DOLLARS_PER_HOUR, START_DATE, TIMEZONE, TRIAL_COUNTS_AS_BILLED } from "./config.js";
+import { NAME_RULES, ONE_OFF_PAYMENT_HOURS, PRICE_HOURS, PROGRAM_DOLLARS_PER_HOUR, START_DATE, TIMEZONE, TRIAL_COUNTS_AS_BILLED } from "./config.js";
 import { stripeGet, stripeListAll, toUnix } from "./stripe.js";
 
 export interface Customer {
@@ -42,11 +42,12 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 
 export async function fetchBilling(): Promise<{ customers: Map<string, Customer>; events: BillingEvent[] }> {
   const since = { "created[gte]": toUnix(START_DATE) };
-  const [prices, rawCustomers, subscriptions, invoices, refunds, creditNotes] = await Promise.all([
+  const [prices, rawCustomers, subscriptions, invoices, charges, refunds, creditNotes] = await Promise.all([
     stripeListAll<any>("prices", { "expand[]": "data.product" }),
     stripeListAll<any>("customers"),
     stripeListAll<any>("subscriptions", { status: "all" }),
     stripeListAll<any>("invoices", { status: "paid", ...since }),
+    stripeListAll<any>("charges", since),
     stripeListAll<any>("refunds", { "expand[]": "data.charge", ...since }),
     stripeListAll<any>("credit_notes", since),
   ]);
@@ -103,11 +104,41 @@ export async function fetchBilling(): Promise<{ customers: Map<string, Customer>
     }
   }
 
+  // Payments with no invoice (payment links) often have no Stripe customer either,
+  // so we use the customer with the same email, or a stand-in "guest" customer.
+  const byEmail = new Map([...customers.values()].filter((c) => c.email).map((c) => [c.email, c.id]));
+  const customerIdForCharge = (charge: any): string | undefined => {
+    if (typeof charge.customer === "string") return charge.customer;
+    const email = (charge.billing_details?.email ?? charge.receipt_email ?? "").toLowerCase();
+    if (!email) return undefined;
+    if (byEmail.has(email)) return byEmail.get(email);
+    const id = `guest:${email}`;
+    if (!customers.has(id)) customers.set(id, { id, name: charge.billing_details?.name ?? "", email, weeklyPlanHours: 0 });
+    return id;
+  };
+
+  for (const charge of charges) {
+    if (charge.status !== "succeeded" || charge.invoice) continue;
+    const customerId = customerIdForCharge(charge);
+    if (!customerId) continue;
+    const description = charge.description || "Payment without invoice";
+    const fromDescription = description.match(/(\d+(?:\.\d+)?)\s*(?:\w+\s+)?(?:sessions?|lessons?|hours?)/i)?.[1];
+    events.push({
+      customerId,
+      date: localDate(charge.created),
+      kind: "one-off",
+      description,
+      amount: charge.amount / 100,
+      hours: fromDescription ? Number(fromDescription) : ONE_OFF_PAYMENT_HOURS[charge.amount / 100] ?? null,
+    });
+  }
+
   // Refund hours are filled in later using each family's own price per hour.
   for (const refund of refunds) {
-    if (refund.status !== "succeeded" || !refund.charge?.customer) continue;
+    const customerId = refund.status === "succeeded" && refund.charge ? customerIdForCharge(refund.charge) : undefined;
+    if (!customerId) continue;
     events.push({
-      customerId: refund.charge.customer,
+      customerId,
       date: localDate(refund.created),
       kind: "refund",
       description: refund.reason ? `Refund (${refund.reason})` : "Refund",
