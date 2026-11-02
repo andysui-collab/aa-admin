@@ -9,7 +9,7 @@ export const TIMEZONE = "Australia/Melbourne";
 export const MASTER_SHEET_ID = "1H8dliRwRh_BlvOZNCubAQIxQ9dkhIBa0nRai9BP9Jjw";
 export const MASTER_CLIENTS_GID = "353391691";
 // The "Stripe Links" tab (confirmed Stripe matches). Until it's set, data/stripe-links.csv is used.
-export const STRIPE_LINKS_GID: string | null = null;
+export const STRIPE_LINKS_GID: string | null = "1315922554";
 
 // Hours per week for prices whose product name is misleading. Checked first.
 export const PRICE_HOURS: Record<string, number> = {
