@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { fetchBilling } from "../billing.js";
 import { START_DATE } from "../config.js";
 import { buildAccounts, today } from "../ledger.js";
-import { groupFamilies, matchFamilies, OVERRIDES_PATH } from "../match.js";
+import { groupFamilies, matchFamilies, OVERRIDES_PATH, readIgnored } from "../match.js";
 import { fetchClients, fetchLessons } from "../sheets.js";
 
 const csvCell = (v: unknown) => {
@@ -29,7 +29,15 @@ const matches = matchFamilies(families, customers, billedCustomerIds);
 const accounts = buildAccounts(matches, customers, events);
 
 const matchedCustomerIds = new Set(matches.flatMap((m) => m.customerIds));
-const billedButUnmatched = [...billedCustomerIds].filter((id) => !matchedCustomerIds.has(id)).map((id) => customers.get(id)!);
+const ignored = readIgnored();
+const billedButUnmatched = [...billedCustomerIds]
+  .filter((id) => !matchedCustomerIds.has(id) && !ignored.has(id))
+  .map((id) => customers.get(id)!);
+const billedSummary = (id: string) => {
+  const billed = events.filter((e) => e.customerId === id && e.amount > 0);
+  const dates = billed.map((e) => e.date).sort();
+  return [billed.reduce((s, e) => s + (e.hours ?? 0), 0), `$${billed.reduce((s, e) => s + e.amount, 0).toFixed(0)}`, dates[0], dates.at(-1)];
+};
 const liveButUnmatched = billedButUnmatched.filter((c) => c.weeklyPlanHours > 0);
 
 mkdirSync("out", { recursive: true });
@@ -85,7 +93,8 @@ ${flagged.length ? mdTable(accountHeader, flagged.map(accountRow)) : "None."}
 ## Live subscriptions with no lessons matched
 These are being billed but we can't find their lessons — either a matching gap (fix in \`${OVERRIDES_PATH}\`) or genuinely no lessons.
 
-${mdTable(["Customer", "Email", "Plan hrs/wk"], liveButUnmatched.map((c) => [c.name, c.email, c.weeklyPlanHours]))}
+${mdTable(["Customer", "Email", "Plan hrs/wk", "Hours billed", "$ billed", "First billed", "Last billed"],
+  liveButUnmatched.map((c) => [c.name, c.email, c.weeklyPlanHours, ...billedSummary(c.id)]))}
 
 ## Families with lessons but no Stripe match
 ${mdTable(["Family key", "Parent", "Students", "Lessons", "Suggested match", "Score"],

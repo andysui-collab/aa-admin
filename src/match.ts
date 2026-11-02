@@ -88,6 +88,13 @@ export function groupFamilies(lessons: Lesson[], clients: Client[]): Family[] {
   return [...families.values()];
 }
 
+// Stripe customers to leave out of the report entirely (data/ignored-customers.csv: customer_id,note).
+export const IGNORED_PATH = "data/ignored-customers.csv";
+export function readIgnored(): Set<string> {
+  if (!existsSync(IGNORED_PATH)) return new Set();
+  return new Set(parseCsv(readFileSync(IGNORED_PATH, "utf8")).slice(1).map((r) => r[0]?.trim()).filter(Boolean));
+}
+
 function readOverrides(): Map<string, string[]> {
   const overrides = new Map<string, string[]>();
   if (!existsSync(OVERRIDES_PATH)) return overrides;
