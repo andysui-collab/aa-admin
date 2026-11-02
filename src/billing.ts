@@ -1,6 +1,6 @@
 // Turns Stripe invoices, refunds and credits into "billing events" measured in lesson hours.
 
-import { NAME_RULES, PRICE_HOURS, START_DATE, TIMEZONE, TRIAL_COUNTS_AS_BILLED } from "./config.js";
+import { NAME_RULES, PRICE_HOURS, PROGRAM_DOLLARS_PER_HOUR, START_DATE, TIMEZONE, TRIAL_COUNTS_AS_BILLED } from "./config.js";
 import { stripeGet, stripeListAll, toUnix } from "./stripe.js";
 
 export interface Customer {
@@ -83,9 +83,10 @@ export async function fetchBilling(): Promise<{ customers: Map<string, Customer>
       const isProration = line.proration || line.parent?.subscription_item_details?.proration;
       const isTrial = /^trial period/i.test(line.description ?? "");
       const perUnit = hoursPerUnit(priceId, name);
+      const programRate = PROGRAM_DOLLARS_PER_HOUR.find(([pattern]) => pattern.test(name))?.[1];
 
       let kind: BillingEvent["kind"] = isSubscription ? "subscription" : "one-off";
-      let hours = perUnit === null ? null : perUnit * quantity;
+      let hours = programRate ? line.amount / 100 / programRate : perUnit === null ? null : perUnit * quantity;
       if (isProration) { kind = "proration"; hours = null; }
       else if (isTrial) { kind = "trial"; if (!TRIAL_COUNTS_AS_BILLED) hours = 0; }
       // A $0 one-off line (e.g. a waived item) that isn't a trial doesn't count as a lesson.

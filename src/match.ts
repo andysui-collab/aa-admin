@@ -48,8 +48,17 @@ function similarity(a: string, b: string): number {
 
 export function groupFamilies(lessons: Lesson[], clients: Client[]): Family[] {
   const families = new Map<string, Family>();
-  for (const lesson of lessons) {
-    const key = lesson.parentEmail || `no-email:${firstName(lesson.parentName)}|${firstName(lesson.student)}`;
+  // Rows with a parent email first, so rows missing one can join the same student's family.
+  const sorted = [...lessons].sort((a, b) => Number(!a.parentEmail) - Number(!b.parentEmail));
+  for (const lesson of sorted) {
+    let key = lesson.parentEmail;
+    if (!key) {
+      const sameStudent = [...families.values()].filter((f) =>
+        [...f.students].some((s) => firstName(s) === firstName(lesson.student)));
+      const sameTutor = sameStudent.filter((f) => f.tutors.has(lesson.tutor));
+      const found = sameTutor.length === 1 ? sameTutor[0] : sameStudent.length === 1 ? sameStudent[0] : undefined;
+      key = found?.key ?? `no-email:${firstName(lesson.parentName)}|${firstName(lesson.student)}`;
+    }
     let family = families.get(key);
     if (!family) {
       family = {

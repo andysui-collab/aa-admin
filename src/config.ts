@@ -16,12 +16,20 @@ export const PRICE_HOURS: Record<string, number> = {
   price_1TSF9cE3ALJUDeBoLJtdtYOq: 1, // $60/wk "Additional Lesson (1x a week)" is a full hour ($30 and $40 are half hours)
 };
 
+// Upfront programs buy a block of hours, often paid in instalments, so they're converted by
+// dollars paid: e.g. Advanced is $3,200 for 40 hours, so a $1,070 instalment = 13.4 hours.
+export const PROGRAM_DOLLARS_PER_HOUR: [RegExp, number][] = [
+  [/transformation program \(advanced\)/i, 3200 / 40],
+  [/transformation program \(standard\)/i, 1800 / 20],
+];
+
 // Hours per unit, matched against the product name (or line description). First match wins.
 // null = we can't convert this to hours; the dollars are shown for manual review instead.
 export const NAME_RULES: [RegExp, number | null][] = [
   [/deposit/i, 0],
   [/transformation program - \(single subject weekly\)/i, 1],
-  [/transformation|mindmastery/i, null],
+  [/mindmastery/i, 0], // very old program, ignored
+  [/transformation/i, null],
   [/additional lesson/i, 0.5],
   [/additional session \(1hr\)/i, 1],
   [/2 lessons/i, 2],
