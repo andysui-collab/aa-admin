@@ -1,11 +1,12 @@
 // npm run reconcile
-// Builds the same report as the website and saves it to out/ (gitignored: contains personal data):
+// Runs the same reconciliation as the website's button and saves it to out/ (gitignored: contains personal data):
 //   out/report.html          the report page
 //   out/matches.csv          which Clients rows were linked to which Stripe customers, and how
 //   out/billing-events.csv   every Stripe item behind each family's billed hours
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { renderReport } from "../html.js";
+import { renderPage } from "../html.js";
+import { toSnapshot } from "../snapshot.js";
 import { accountName, accountStudents, buildReport, familyLessons } from "../report.js";
 
 const csvCell = (v: unknown) => {
@@ -18,7 +19,7 @@ console.log("Fetching Clients tab and Stripe...");
 const report = await buildReport();
 
 mkdirSync("out", { recursive: true });
-writeFileSync("out/report.html", renderReport(report));
+writeFileSync("out/report.html", renderPage(toSnapshot(report), { canReconcile: false }));
 
 writeFileSync("out/matches.csv", toCsv([
   ["family_key", "parent", "students", "lessons_delivered", "method", "stripe_customer_ids", "suggested_customer_id", "suggested_name", "suggested_email", "score"],

@@ -3,7 +3,7 @@
 Internal admin tooling for the tutoring business. The owner is new to coding: explain changes in plain language and keep code simple.
 
 ## What's here
-- **Website** (Vercel): `api/index.ts` serves the reconciliation report at `/`, built fresh on each visit. Protected by a bookmark link: `/?key=<SITE_PASSWORD>` sets a cookie for a year; everyone else gets a 404. `api/failed-payments.ts` runs daily (cron in `vercel.json`) and POSTs failed payments from the last 24h to the n8n webhook in `N8N_WEBHOOK_URL`, which texts the owner. Quiet days send nothing.
+- **Website** (Vercel): `api/index.ts` shows the last saved reconciliation at `/` (loads instantly; filtering/sorting/search run in the browser). The "Reconcile now" button POSTs to `api/reconcile.ts`, which re-runs it and saves the result in Upstash Redis (`src/store.ts`; `KV_REST_API_URL`/`KV_REST_API_TOKEN` are set by Vercel's Storage integration). Protected by a bookmark link: `/?key=<SITE_PASSWORD>` sets a cookie for a year; everyone else gets a 404. `api/failed-payments.ts` runs daily (cron in `vercel.json`) and POSTs failed payments from the last 24h to the n8n webhook in `N8N_WEBHOOK_URL`, which texts the owner. Quiet days send nothing.
 - Vercel environment variables: `STRIPE_API_KEY` (restricted, read-only), `SITE_PASSWORD`, `CRON_SECRET`, `N8N_WEBHOOK_URL`.
 - `npm run reconcile`: same report locally. Writes `out/report.html`, `out/billing-events.csv`, `out/matches.csv`.
 - `npm run failed-payments`: prints failed payments from the last 24h. Prints nothing if there were none.
@@ -14,7 +14,7 @@ Internal admin tooling for the tutoring business. The owner is new to coding: ex
 - `src/billing.ts`: Stripe → billing events in hours (paid invoices, refunds, credit notes, balance adjustments).
 - `src/match.ts`: Clients rows (grouped by parent email) → Stripe customers. Order: confirmed matches in the master sheet's "Stripe Links" tab (`STRIPE_LINKS_GID`; falls back to `data/stripe-links.csv`), then exact email, then name *suggestions* (never used automatically).
 - `src/accounts.ts`: totals per account. Net billed = billed − refunded/credited; balance = net billed − delivered. Positive = paid for lessons not yet had.
-- `src/report.ts` builds the report; `src/html.ts` renders it (shared by the CLI and the website).
+- `src/report.ts` builds the report; `src/snapshot.ts` turns it into plain JSON for saving; `src/html.ts` renders a snapshot (shared by the CLI and the website).
 
 ## Rules
 - Stripe access is **read-only**. Never write to Stripe or the sheets.
