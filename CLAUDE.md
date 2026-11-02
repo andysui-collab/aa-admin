@@ -3,7 +3,7 @@
 Internal admin tooling for the tutoring business. The owner is new to coding: explain changes in plain language and keep code simple.
 
 ## What's here
-- **Website** (Vercel): `api/index.ts` serves the reconciliation report at `/`, built fresh on each visit and protected by `SITE_PASSWORD`. `api/failed-payments.ts` runs daily (cron in `vercel.json`) and POSTs failed payments from the last 24h to the n8n webhook in `N8N_WEBHOOK_URL`, which texts the owner. Quiet days send nothing.
+- **Website** (Vercel): `api/index.ts` serves the reconciliation report at `/`, built fresh on each visit. Protected by a bookmark link: `/?key=<SITE_PASSWORD>` sets a cookie for a year; everyone else gets a 404. `api/failed-payments.ts` runs daily (cron in `vercel.json`) and POSTs failed payments from the last 24h to the n8n webhook in `N8N_WEBHOOK_URL`, which texts the owner. Quiet days send nothing.
 - Vercel environment variables: `STRIPE_API_KEY` (restricted, read-only), `SITE_PASSWORD`, `CRON_SECRET`, `N8N_WEBHOOK_URL`.
 - `npm run reconcile`: same report locally. Writes `out/report.html`, `out/billing-events.csv`, `out/matches.csv`.
 - `npm run failed-payments`: prints failed payments from the last 24h. Prints nothing if there were none.

@@ -1,14 +1,27 @@
-// Simple password protection for the website (the browser shows a username/password box;
-// any username works, the password must match SITE_PASSWORD in Vercel's environment variables).
+// Low-friction protection for the website. Open https://<site>/?key=<SITE_PASSWORD> once (bookmark it):
+// the site saves a cookie so that browser stays signed in for a year. Anyone without the key gets nothing.
 
-export function isAuthorized(request: Request): boolean {
+const COOKIE = "aa_admin_key";
+
+const cookieValue = (request: Request) =>
+  request.headers.get("cookie")?.split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
+
+// Returns the response to send instead of the page, or null if the visitor is allowed in.
+export function checkAccess(request: Request): Response | null {
   const password = process.env.SITE_PASSWORD;
-  if (!password) return false; // no password configured = locked, never open
-  const header = request.headers.get("authorization") ?? "";
-  if (!header.startsWith("Basic ")) return false;
-  const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
-  return decoded.slice(decoded.indexOf(":") + 1) === password;
-}
+  if (!password) return new Response("SITE_PASSWORD isn't set in Vercel, so the site is locked.", { status: 503 });
 
-export const passwordRequired = () =>
-  new Response("Password required", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="aa-admin", charset="UTF-8"' } });
+  const url = new URL(request.url);
+  if (url.searchParams.get("key") === password) {
+    // Remember this browser, then reload without the key in the address bar.
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: "/",
+        "Set-Cookie": `${COOKIE}=${encodeURIComponent(password)}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax`,
+      },
+    });
+  }
+  if (cookieValue(request) === encodeURIComponent(password)) return null;
+  return new Response("Not found", { status: 404 });
+}
