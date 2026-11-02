@@ -84,7 +84,7 @@ code { font-size:13px; background:var(--bg); padding:1px 4px; border-radius:4px;
     <button class="btn" type="submit" id="reconcile-btn">Reconcile now</button>
   </form>` : ""}
 </div>
-${error ? `<div class="error">Reconciliation failed: ${esc(error)}</div>` : ""}
+${error ? `<div class="error">Something went wrong: ${esc(error)}</div>` : ""}
 <p class="lede">Net billed (hours billed in Stripe since ${esc(START_DATE)}, less refunds and credits) vs lessons delivered (Clients tab, maths + English).
 Positive balance = paid for lessons not yet had. Balances within one week of a family's plan count as normal billing timing (OK).</p>
 
