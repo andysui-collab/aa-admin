@@ -1,5 +1,5 @@
 // Totals per family account.
-// Balance (hours) = billed - refunded/credited - delivered (Clients tab maths + English, 1 lesson = 1 hour).
+// Balance (hours) = net billed (billed - refunded/credited) - delivered (Clients tab maths + English, 1 lesson = 1 hour).
 //   positive = family has paid for lessons they haven't had (overbilled / prepaid)
 //   negative = family has had lessons they haven't paid for (underbilled)
 
@@ -15,6 +15,7 @@ export interface Account {
   pricePerHour: number | null;
   billedHours: number;
   creditedHours: number; // refunds and credits, as a negative number
+  netBilledHours: number; // billed - refunded/credited: the number to compare with lessons delivered
   deliveredHours: number;
   balance: number;
   unconvertedAmount: number; // dollars we couldn't turn into hours
@@ -59,8 +60,9 @@ export function buildAccounts(matches: Match[], customers: Map<string, Customer>
     const isCredit = (e: BillingEvent) => e.kind === "refund" || e.kind === "credit";
     account.billedHours = sumHours(events.filter((e) => !isCredit(e)));
     account.creditedHours = sumHours(events.filter(isCredit));
+    account.netBilledHours = round(account.billedHours + account.creditedHours);
     account.deliveredHours = account.families.flatMap((f) => f.clients).reduce((s, c) => s + c.maths + c.english, 0);
-    account.balance = round(account.billedHours + account.creditedHours - account.deliveredHours);
+    account.balance = round(account.netBilledHours - account.deliveredHours);
     account.unconvertedAmount = round(events.filter((e) => e.hours === null).reduce((s, e) => s + e.amount, 0));
 
     // Billing and lessons fall on different days, so a gap within one week of the plan is normal timing.

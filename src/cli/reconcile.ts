@@ -66,18 +66,18 @@ writeFileSync("out/billing-events.csv", toCsv([
 const flagged = accounts.filter((a) => a.status !== "OK").sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance));
 const accountRow = (a: Account) => [
   a.status, accountName(a), students(a), a.weeklyPlanHours || "none live",
-  a.billedHours, a.creditedHours, a.deliveredHours, `**${fmtH(a.balance)}**`,
+  a.billedHours, a.creditedHours, `**${a.netBilledHours}**`, a.deliveredHours, `**${fmtH(a.balance)}**`,
   a.pricePerHour ? `$${(a.balance * a.pricePerHour).toFixed(0)}` : "?",
   a.unconvertedAmount ? `$${a.unconvertedAmount}` : "",
   a.lastBilled,
 ];
-const accountHeader = ["Status", "Stripe customer", "Students", "Plan hrs/wk", "Billed", "Refunded", "Delivered", "Balance (hrs)", "≈ $", "Needs review $", "Last billed"];
+const accountHeader = ["Status", "Stripe customer", "Students", "Plan hrs/wk", "Billed", "Refunded", "Net billed", "Delivered", "Balance (hrs)", "≈ $", "Needs review $", "Last billed"];
 const count = (method: string) => matches.filter((m) => m.method === method).length;
 const liveButUnmatched = billedButUnmatched.filter((c) => c.weeklyPlanHours > 0);
 
 const summary = `# Billing reconciliation — ${today()}
 
-Total hours billed in Stripe since ${START_DATE} vs total lessons delivered (Clients tab, maths + English; 1 lesson = 1 hour).
+**Net billed** (hours billed in Stripe since ${START_DATE}, less refunds and credits) vs total lessons delivered (Clients tab, maths + English; 1 lesson = 1 hour).
 **Positive balance** = family paid for lessons they haven't had. **Negative** = lessons not yet paid for.
 Balances within ±1 week of the family's plan are treated as normal billing/lesson timing.
 
