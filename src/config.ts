@@ -5,9 +5,11 @@ export const START_DATE = "2026-03-01";
 
 export const TIMEZONE = "Australia/Melbourne";
 
-// The master sheet (public link). Tutors tab, column E, lists each tutor's tracker sheet.
+// The master sheet (public link) and its Clients tab.
 export const MASTER_SHEET_ID = "1H8dliRwRh_BlvOZNCubAQIxQ9dkhIBa0nRai9BP9Jjw";
 export const MASTER_CLIENTS_GID = "353391691";
+// The "Stripe Links" tab (confirmed Stripe matches). Until it's set, data/stripe-links.csv is used.
+export const STRIPE_LINKS_GID: string | null = null;
 
 // Hours per week for prices whose product name is misleading. Checked first.
 export const PRICE_HOURS: Record<string, number> = {

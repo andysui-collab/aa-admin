@@ -1,14 +1,42 @@
 // Links families in the Clients tab to Stripe customers.
-// 1. Manual overrides in data/overrides.csv win.
+// 1. Confirmed matches in the "Stripe Links" tab win.
 // 2. Otherwise an exact email match (parent or student email) is trusted.
 // 3. Otherwise the closest name match is *suggested* for a human to confirm, and left out of the totals.
 
 import { existsSync, readFileSync } from "node:fs";
 import type { Customer } from "./billing.js";
+import { MASTER_SHEET_ID, STRIPE_LINKS_GID } from "./config.js";
 import { parseCsv, type Client } from "./sheets.js";
 
-export const OVERRIDES_PATH = "data/overrides.csv";
-export const IGNORED_PATH = "data/ignored-customers.csv";
+// Confirmed matches live in the "Stripe Links" tab of the master sheet (or data/stripe-links.csv
+// until that tab exists). Columns: family_key, stripe_customer_ids, note.
+//   family_key = the parent email from the Clients tab; stripe_customer_ids = one or more, separated by ";"
+//   (or "none"). A row with family_key "ignore" leaves those Stripe customers out of the report.
+export const LOCAL_LINKS_PATH = "data/stripe-links.csv";
+
+export interface Links {
+  overrides: Map<string, string[]>;
+  ignored: Set<string>;
+}
+
+export async function loadLinks(): Promise<Links> {
+  let rows: string[][] = [];
+  if (STRIPE_LINKS_GID) {
+    const url = `https://docs.google.com/spreadsheets/d/${MASTER_SHEET_ID}/export?format=csv&gid=${STRIPE_LINKS_GID}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Couldn't read the Stripe Links tab: ${res.status}`);
+    rows = parseCsv(await res.text());
+  } else if (existsSync(LOCAL_LINKS_PATH)) {
+    rows = parseCsv(readFileSync(LOCAL_LINKS_PATH, "utf8"));
+  }
+  const links: Links = { overrides: new Map(), ignored: new Set() };
+  for (const [key = "", ids = ""] of rows.slice(1)) {
+    const customerIds = ids.trim() === "none" ? [] : ids.split(";").map((s) => s.trim()).filter(Boolean);
+    if (key.trim().toLowerCase() === "ignore") customerIds.forEach((id) => links.ignored.add(id));
+    else if (key.trim()) links.overrides.set(key.trim().toLowerCase(), customerIds);
+  }
+  return links;
+}
 
 // Siblings with the same parent email are one family.
 export interface Family {
@@ -61,26 +89,9 @@ export function groupFamilies(clients: Client[]): Family[] {
   return [...families.values()];
 }
 
-function readCsvFile(path: string): string[][] {
-  return existsSync(path) ? parseCsv(readFileSync(path, "utf8")).slice(1).filter((r) => r[0]?.trim()) : [];
-}
-
-// data/overrides.csv: family_key,stripe_customer_ids (several separated by ";", or "none")
-function readOverrides(): Map<string, string[]> {
-  return new Map(readCsvFile(OVERRIDES_PATH).map(([key, ids]) => [
-    key.trim(),
-    ids?.trim() === "none" ? [] : (ids ?? "").split(";").map((s) => s.trim()).filter(Boolean),
-  ]));
-}
-
-// data/ignored-customers.csv: customer_id,note. These customers are left out of the report.
-export function readIgnored(): Set<string> {
-  return new Set(readCsvFile(IGNORED_PATH).map((r) => r[0].trim()));
-}
-
-export function matchFamilies(families: Family[], customers: Map<string, Customer>, billedCustomerIds: Set<string>): Match[] {
-  const overrides = readOverrides();
-  const ignored = readIgnored();
+export function matchFamilies(
+  families: Family[], customers: Map<string, Customer>, billedCustomerIds: Set<string>, { overrides, ignored }: Links,
+): Match[] {
   const byEmail = new Map<string, Customer[]>();
   for (const c of customers.values()) {
     if (c.email) byEmail.set(c.email, [...(byEmail.get(c.email) ?? []), c]);

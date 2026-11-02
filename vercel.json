@@ -1,0 +1,4 @@
+{
+  "rewrites": [{ "source": "/", "destination": "/api/index" }],
+  "crons": [{ "path": "/api/failed-payments", "schedule": "0 22 * * *" }]
+}
