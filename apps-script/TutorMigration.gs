@@ -178,7 +178,7 @@ function migSheet_(tutor, reference, clientsIndex, apply) {
   if (found === "OLD_STATE") lines.push("Insert Status column at A (everything moves one column right)");
   if (found === "OLDEST") lines.push("Insert Status column at A and State column at D (everything else moves right)");
   shifted.forEach((s) => lines.push("Fix row " + s.row + " (" + s.values[0] + "): it was typed one column out of place; put each value back in its column"));
-  if (!isReference) lines.push("Copy rows 1–3 (instructions and headers) and column widths from " + MIG.REFERENCE_TUTOR + "'s sheet");
+  if (!isReference) lines.push("Copy rows 1-3 (instructions and headers) and column widths from " + MIG.REFERENCE_TUTOR + "'s sheet");
   lines.push("Students J4:N" + formulaLastRow + ": one formula per row, same as the reference; Most Recent Session fixed to show 'No sessions yet' instead of 0 and formatted as a date");
   lines.push("Sessions G6:J6: the reference's whole-column formulas (G7:J" + sessions.getMaxRows() + " cleared first so they can fill down)");
   lines.push("Status column: ACTIVE / PAUSED / CANCELLED dropdown and colours" + (found === "NEW" ? " (re-applied)" : ""));
@@ -229,7 +229,7 @@ function migSheet_(tutor, reference, clientsIndex, apply) {
 
   if (students.getMaxRows() < formulaLastRow) students.insertRowsAfter(students.getMaxRows(), formulaLastRow - students.getMaxRows());
 
-  // Rows 1–3 and column widths from the reference
+  // Rows 1-3 and column widths from the reference
   if (!isReference) {
     const refTop = reference.students.getRange("A1:N3");
     const top = students.getRange("A1:N3");
@@ -336,7 +336,7 @@ function migFixClientFormulas_(master, tutors, migratedRows, apply) {
         lines.push(letter + rowNumber + " " + student + ": note, formula reads " + tutorByRow[tutorRow] + "'s sheet but columns M/N name " + namedTutors.join(" & ") + " (not changed by this, just flagged)");
       }
       if (updated === formula) return;
-      lines.push(letter + rowNumber + " " + student + ": " + formula + "  →  " + updated);
+      lines.push(letter + rowNumber + " " + student + ": " + formula + "  ->  " + updated);
       if (apply) clients.getRange(rowNumber, col + 1).setFormula(updated);
     });
   }

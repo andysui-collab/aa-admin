@@ -2,8 +2,8 @@
 // master sheet's Clients tab O/P formulas, before moving tutor sheets to the new template.
 // It changes nothing in any tutor sheet. Its only write is a "Template Check" tab in this master sheet.
 //
-// How to run: add this as its own file in the master sheet's Apps Script project (+ next to Files →
-// Script → TemplateCheck), save, choose checkTutorTemplates in the function menu at the top, press Run,
+// How to run: add this as its own file in the master sheet's Apps Script project (+ next to Files ->
+// Script -> TemplateCheck), save, choose checkTutorTemplates in the function menu at the top, press Run,
 // and allow access when Google asks. It takes about a minute.
 
 const TEMPLATE_CHECK_TAB = "Template Check";

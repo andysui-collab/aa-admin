@@ -1,4 +1,4 @@
-// Add this as its own file in the master sheet's Apps Script project (Extensions → Apps Script → + → Script,
+// Add this as its own file in the master sheet's Apps Script project (Extensions -> Apps Script -> + -> Script,
 // name it StripeLinks); it sits alongside existing files like Code.gs without changing them. It lets the aa-admin app add rows
 // to the "Stripe Links" tab (and nothing else). Setup steps are at the bottom of this file.
 //
@@ -41,11 +41,11 @@ function doPost(e) {
         return stripeLinksReply_({ ok: true, updated: false });
       }
       if (familyKey !== "ignore" && rowKey === familyKey) {
-        sheet.getRange(i + 1, 2, 1, 2).setValues([[customerIds, note ? note + " · " + stamp : stamp]]);
+        sheet.getRange(i + 1, 2, 1, 2).setValues([[customerIds, note ? note + " - " + stamp : stamp]]);
         return stripeLinksReply_({ ok: true, updated: true });
       }
     }
-    sheet.appendRow([familyKey, customerIds, note ? note + " · " + stamp : stamp]);
+    sheet.appendRow([familyKey, customerIds, note ? note + " - " + stamp : stamp]);
     return stripeLinksReply_({ ok: true, updated: false });
   } finally {
     lock.releaseLock();
@@ -57,9 +57,9 @@ function stripeLinksReply_(data) {
 }
 
 // SETUP
-// 1. Open the master sheet → Extensions → Apps Script → + next to Files → Script → name it StripeLinks.
+// 1. Open the master sheet -> Extensions -> Apps Script -> + next to Files -> Script -> name it StripeLinks.
 //    Paste this file in and save. (Only one doPost may exist per project: if another file has one, combine them.)
-// 2. Project Settings (gear icon) → Script Properties → Add property: SECRET = a long random string.
-// 3. Deploy → New deployment → type "Web app". Execute as: Me. Who has access: Anyone. Deploy, authorise.
+// 2. Project Settings (gear icon) -> Script Properties -> Add property: SECRET = a long random string.
+// 3. Deploy -> New deployment -> type "Web app". Execute as: Me. Who has access: Anyone. Deploy, authorise.
 // 4. Copy the Web app URL. In Vercel add APPS_SCRIPT_URL (that URL) and APPS_SCRIPT_SECRET (same SECRET), then redeploy.
-// If you edit this script later: Deploy → Manage deployments → edit → Version: New version (keeps the same URL).
+// If you edit this script later: Deploy -> Manage deployments -> edit -> Version: New version (keeps the same URL).
