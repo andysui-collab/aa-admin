@@ -14,6 +14,27 @@ function simpleTable(header: string[], rows: unknown[][]): string {
     <tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 
+// <option>s for choosing a family to link a Stripe customer to: reconciled families, then Clients with no customer yet.
+function familyOptions(snapshot: Snapshot): string {
+  const families = [
+    ...snapshot.accounts.map((a) => ({ key: a.familyKey, label: `${a.students} (${a.parentEmails || a.stripeNames})` })),
+    ...snapshot.unmatchedClients.map((c) => ({ key: c.parentEmail, label: `${c.students} (${c.parentEmail}), no Stripe customer yet` })),
+  ].sort((x, y) => x.label.localeCompare(y.label));
+  return `<option value="">Link to family...</option>` + families.map((f) => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join("");
+}
+
+function unmatchedTable(rows: Snapshot["unmatchedLive"], caption: string, options: string, canEdit: boolean): string {
+  if (!rows.length) return caption ? `<p class="empty">${esc(caption)}: none.</p>` : "";
+  return `${caption ? `<p class="count">${esc(caption)}</p>` : ""}<div class="scroll"><table><thead><tr><th>Stripe customer</th><th>Customer ID</th>
+    <th class="num">Plan hrs/wk</th><th class="num">Hours billed</th><th class="num">$ billed</th><th>Billed</th>${canEdit ? "<th></th>" : ""}</tr></thead><tbody>
+  ${rows.map((u) => `<tr><td>${esc(u.name)}<div class="sub">${esc(u.email)}</div></td><td><code>${esc(u.id)}</code></td>
+    <td class="num">${u.planHours}</td><td class="num">${u.hoursBilled}</td><td class="num">${money(u.amountBilled)}</td><td>${esc(u.firstBilled)} - ${esc(u.lastBilled)}</td>
+    ${canEdit ? `<td class="action"><div class="confirm"><select aria-label="Family for ${esc(u.name)}">${options}</select>
+      <button type="button" class="btn small" data-link="${esc(u.id)}" data-note="${esc(u.name)}">Link</button>
+      <button type="button" class="btn small ghost" data-ignore="${esc(u.id)}" data-note="${esc(u.name)}">Ignore</button></div></td>` : ""}</tr>`).join("")}
+  </tbody></table></div>`;
+}
+
 export interface PageOptions {
   canReconcile: boolean; // false when viewing a local file (no server to run the reconciliation)
   error?: string;
@@ -21,7 +42,7 @@ export interface PageOptions {
 
 export function renderPage(saved: Snapshot | null, { canReconcile, error }: PageOptions): string {
   // A result saved by an older version of the app lacks the date-range fields: ask for a fresh reconcile.
-  const outdated = saved !== null && (!saved.asOf || (saved.accounts.length > 0 && !Array.isArray(saved.accounts[0].statuses)));
+  const outdated = saved !== null && (!saved.asOf || (saved.accounts.length > 0 && !Array.isArray(saved.accounts[0].statuses)) || !Array.isArray(saved.unmatchedOther));
   const snapshot = outdated ? null : saved;
   const reconciled = saved
     ? new Date(saved.reconciledAt).toLocaleString("en-AU", { timeZone: TIMEZONE, weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })
@@ -56,6 +77,7 @@ button, select, input { font:inherit; color:inherit; }
 .btn.small { padding:6px 12px; font-size:14px; } .btn.ghost { background:none; color:var(--text); border:1px solid var(--line); }
 .confirm { display:flex; gap:6px; flex-wrap:wrap; } .confirm select { max-width:320px; min-width:0; flex:1 1 200px; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 8px; }
 td.action { white-space:nowrap; } .done { color:var(--ok); font-weight:600; } .failed { color:var(--under); font-size:13px; white-space:normal; }
+details.more { margin-top:12px; } details.more summary { cursor:pointer; color:var(--muted); font-size:14px; margin-bottom:8px; }
 .banner { position:sticky; bottom:12px; margin-top:20px; background:var(--accent); color:var(--accent-text); border-radius:10px; padding:12px 16px; display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
 .banner .btn { background:var(--accent-text); color:var(--accent); }
 .error { background:var(--error-bg); color:var(--under); border-radius:8px; padding:10px 14px; margin:16px 0 0; }
@@ -152,13 +174,15 @@ Date ranges cover the ${DATED_WEEKS} weeks up to the last reconcile (${esc(snaps
   <tbody></tbody>
 </table></div>
 
-<h2>Live subscriptions with no Clients row</h2>
-<p class="hint">Being billed but not linked to the Clients tab. Match them from the list below, or press <strong>Ignore</strong> if they should never appear.</p>
-${snapshot.unmatchedLive.length ? `<div class="scroll"><table><thead><tr><th>Stripe customer</th><th>Customer ID</th><th class="num">Plan hrs/wk</th><th class="num">Hours billed</th><th class="num">$ billed</th><th>Billed</th>${canReconcile ? "<th></th>" : ""}</tr></thead><tbody>
-  ${snapshot.unmatchedLive.map((u) => `<tr><td>${esc(u.name)}<div class="sub">${esc(u.email)}</div></td><td><code>${esc(u.id)}</code></td>
-    <td class="num">${u.planHours}</td><td class="num">${u.hoursBilled}</td><td class="num">${money(u.amountBilled)}</td><td>${esc(u.firstBilled)} – ${esc(u.lastBilled)}</td>
-    ${canReconcile ? `<td class="action"><button type="button" class="btn small ghost" data-ignore="${esc(u.id)}" data-note="${esc(u.name)}">Ignore</button></td>` : ""}</tr>`).join("")}
-  </tbody></table></div>` : `<p class="empty">None.</p>`}
+<h2>Stripe customers not linked to a family</h2>
+<p class="hint">Billed in Stripe, but not linked to anyone in the Clients tab. Often a parent's second Stripe account (a new subscription under another name or email): pick their family and press <strong>Link</strong>. It's added alongside the family's existing customers. Press <strong>Ignore</strong> if they should never appear.</p>
+${unmatchedTable(snapshot.unmatchedLive, "Live subscriptions", familyOptions(snapshot), canReconcile)}
+${snapshot.unmatchedOther.length ? `<details class="more"><summary>${snapshot.unmatchedOther.length} earlier customer${snapshot.unmatchedOther.length > 1 ? "s" : ""} with no live subscription (their past billing isn't counted for any family)</summary>
+${unmatchedTable(snapshot.unmatchedOther, "", familyOptions(snapshot), canReconcile)}</details>` : ""}
+
+${(snapshot.orphanLinks ?? []).length ? `<p class="hint"><strong>Stripe Links rows that no longer match any family:</strong> usually because the parent's email was changed in the Clients tab.
+Link those customers again under the family's current email using the list above, then delete the old row from the Stripe Links tab.</p>
+${simpleTable(["Old family key (column A)", "Customer IDs (column B)"], snapshot.orphanLinks.map((o) => [o.key, o.customers]))}` : ""}
 
 <h2>Clients with no Stripe customer</h2>
 <p class="hint">${canReconcile
@@ -168,7 +192,7 @@ ${snapshot.unmatchedClients.length ? `<div class="scroll"><table><thead><tr><th>
   ${snapshot.unmatchedClients.map((c) => {
     const options = [
       ...(c.suggestion ? [{ id: c.suggestion.id, label: `Suggested: ${c.suggestion.name} <${c.suggestion.email}>` }] : []),
-      ...snapshot.unmatchedLive.filter((u) => u.id !== c.suggestion?.id).map((u) => ({ id: u.id, label: `${u.name} <${u.email}>` })),
+      ...[...snapshot.unmatchedLive, ...snapshot.unmatchedOther].filter((u) => u.id !== c.suggestion?.id).map((u) => ({ id: u.id, label: `${u.name} <${u.email}>` })),
     ];
     return `<tr><td>${esc(c.students)}</td><td>${esc(c.parent)}<div class="sub">${esc(c.parentEmail)}</div></td><td class="num">${c.lessons}</td>
     <td class="action">${canReconcile ? `<div class="confirm">
@@ -235,6 +259,12 @@ ${canReconcile ? `<div class="banner" id="banner" hidden><span id="banner-text">
       if (id === "other") id = (prompt("Stripe customer ID (starts with cus_). For several, separate with ;") || "").trim();
       if (!id) return;
       saveLink(confirmBtn, confirmBtn.dataset.confirm, id, "");
+    }
+    const linkBtn = e.target.closest("[data-link]");
+    if (linkBtn) {
+      const familyKey = linkBtn.closest(".confirm").querySelector("select").value;
+      if (!familyKey) { alert("Choose the family first."); return; }
+      saveLink(linkBtn, familyKey, linkBtn.dataset.link, linkBtn.dataset.note);
     }
     const ignoreBtn = e.target.closest("[data-ignore]");
     if (ignoreBtn && confirm("Hide " + ignoreBtn.dataset.note + " from the report from now on?")) {
@@ -406,7 +436,10 @@ ${canReconcile ? `<div class="banner" id="banner" hidden><span id="banner-text">
           '</td><td><span class="chip st-' + (s.status || "none") + '">' + LABEL[s.status] + "</span></td></tr>").join("") + "</tbody></table></div>"
       : '<p><strong>Student status:</strong> not found in any tutor&#39;s Students tab.</p>';
     return statusTable + lessons +
-      "<p><strong>Parent email:</strong> " + esc(a.parentEmails || "—") + " · <strong>Stripe:</strong> " + esc(a.stripeNames) + "</p>" +
+      "<p><strong>Parent email:</strong> " + esc(a.parentEmails || "—") + "</p>" +
+      "<p><strong>Stripe customers (" + (a.customers || []).length + "):</strong><br>" + (a.customers || []).map((c) =>
+        esc(c.name || "(no name)") + " &lt;" + esc(c.email) + "&gt; <code>" + esc(c.id) + "</code> - " +
+        (c.planHours ? "live subscription, " + hrs(c.planHours) + " hrs/week" : "no live subscription")).join("<br>") + "</p>" +
       "<p><strong>Plan:</strong> " + (a.planHours ? hrs(a.planHours) + " hrs/week" : "no live subscription") +
       (a.unconverted ? " · <strong>" + money(a.unconverted) + "</strong> couldn't be converted to hours" : "") + "</p>" +
       "<p><strong>Stripe items" + (a.shownLessons === null ? "" : " in this period") + ":</strong></p>" + events;

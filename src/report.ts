@@ -19,7 +19,8 @@ export interface Report {
   matches: Match[];
   unmatchedClients: Match[];
   unmatchedLiveCustomers: UnmatchedCustomer[]; // live subscription, but no Clients row linked
-  unmatchedCustomerCount: number; // billed in period (live or not), no Clients row linked
+  unmatchedOtherCustomers: UnmatchedCustomer[]; // billed in the period, no live subscription, no Clients row linked
+  orphanLinks: { key: string; customerIds: string[] }[]; // Stripe Links rows whose parent email matches no Clients family
   issues: ClientIssue[];
   events: BillingEvent[];
   lessonsByAccount: Map<Account, Lesson[]>; // dated lessons from the tutor sheets
@@ -38,16 +39,21 @@ export async function buildReport(): Promise<Report> {
     await Promise.all([fetchClients(), fetchBilling(), loadLinks(), fetchTutorSheets()]);
 
   const billedCustomerIds = new Set(events.filter((e) => e.amount > 0).map((e) => e.customerId));
-  const matches = matchFamilies(groupFamilies(clients), customers, billedCustomerIds, links);
+  const families = groupFamilies(clients);
+  const matches = matchFamilies(families, customers, billedCustomerIds, links);
+  // A Stripe Links row stops working if the family's parent email is changed in the Clients tab
+  const familyKeys = new Set(families.map((f) => f.key));
+  const orphanLinks = [...links.overrides].filter(([key]) => !familyKeys.has(key)).map(([key, customerIds]) => ({ key, customerIds }));
   const accounts = buildAccounts(matches, customers, events);
 
   const matchedCustomerIds = new Set(matches.flatMap((m) => m.customerIds));
   const unmatchedCustomerIds = [...billedCustomerIds].filter((id) => !matchedCustomerIds.has(id) && !links.ignored.has(id));
-  const unmatchedLiveCustomers = unmatchedCustomerIds
-    .map((id) => customers.get(id)!)
-    .filter((c) => c.weeklyPlanHours > 0)
-    .map((customer) => {
-      const billed = events.filter((e) => e.customerId === customer.id && e.amount > 0);
+  // Every billed customer not linked to a family, newest billing first. Live ones are the urgent ones;
+  // the rest are usually an earlier subscription under a different name/email that belongs to a family.
+  const unmatchedCustomers = unmatchedCustomerIds
+    .map((id) => {
+      const customer = customers.get(id)!;
+      const billed = events.filter((e) => e.customerId === id && e.amount > 0);
       const dates = billed.map((e) => e.date).sort();
       return {
         customer,
@@ -56,7 +62,8 @@ export async function buildReport(): Promise<Report> {
         firstBilled: dates[0],
         lastBilled: dates[dates.length - 1],
       };
-    });
+    })
+    .sort((a, b) => b.lastBilled.localeCompare(a.lastBilled));
 
   const linkToAccount = accountLinker(accounts);
   const lessonsByAccount = new Map<Account, Lesson[]>(accounts.map((a) => [a, []]));
@@ -77,8 +84,9 @@ export async function buildReport(): Promise<Report> {
     flagged: accounts.filter((a) => a.status !== "OK").sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance)),
     matches,
     unmatchedClients: matches.filter((m) => !m.customerIds.length),
-    unmatchedLiveCustomers,
-    unmatchedCustomerCount: unmatchedCustomerIds.length,
+    unmatchedLiveCustomers: unmatchedCustomers.filter((u) => u.customer.weeklyPlanHours > 0),
+    unmatchedOtherCustomers: unmatchedCustomers.filter((u) => u.customer.weeklyPlanHours === 0),
+    orphanLinks,
     issues,
     events,
     lessonsByAccount,

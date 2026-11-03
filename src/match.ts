@@ -1,5 +1,5 @@
 // Links families in the Clients tab to Stripe customers.
-// 1. Confirmed matches in the "Stripe Links" tab win.
+// 1. Confirmed matches in the "Stripe Links" tab (added to any email matches; "none" = no customer).
 // 2. Otherwise an exact email match (parent or student email) is trusted.
 // 3. Otherwise the closest name match is *suggested* for a human to confirm, and left out of the totals.
 
@@ -98,10 +98,12 @@ export function matchFamilies(
   }
 
   const matches: Match[] = families.map((family) => {
+    // A Stripe Links row adds customers to whatever matches by email (a parent may have several Stripe
+    // customers under different names/emails, e.g. a new subscription after an old one was cancelled).
     const override = overrides.get(family.key);
-    if (override) return { family, customerIds: override, method: "override" };
-    const byEmailMatch = [...family.candidateEmails].flatMap((e) => byEmail.get(e) ?? []);
-    if (byEmailMatch.length) return { family, customerIds: [...new Set(byEmailMatch.map((c) => c.id))], method: "email" };
+    const byEmailMatch = [...family.candidateEmails].flatMap((e) => byEmail.get(e) ?? []).map((c) => c.id);
+    if (override) return { family, customerIds: override.length ? [...new Set([...override, ...byEmailMatch])] : [], method: "override" };
+    if (byEmailMatch.length) return { family, customerIds: [...new Set(byEmailMatch)], method: "email" };
     return { family, customerIds: [], method: "none" };
   });
 
