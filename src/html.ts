@@ -206,14 +206,6 @@ ${snapshot.unmatchedClients.length ? `<div class="scroll"><table><thead><tr><th>
   }).join("")}
   </tbody></table></div>` : `<p class="empty">None.</p>`}
 
-${snapshot.unlinkedLessons.length ? `<h2>Tutor-sheet lessons not linked to a family</h2>
-<p class="hint">These lessons aren't in any date-range view: their parent email and student name don't match a reconciled family in the Clients tab.</p>
-${simpleTable(["Date", "Student", "Subject", "Tutor", "Hours", "Parent email"], snapshot.unlinkedLessons.map((l) => [l.date, l.student, l.subject, l.tutor, l.hours, l.parentEmail || "—"]))}` : ""}
-
-${(snapshot.unlinkedStatuses ?? []).length ? `<h2>Tutor-sheet students not linked to a family</h2>
-<p class="hint">In a tutor's Students tab, but their parent email and name don't match a reconciled family in the Clients tab.</p>
-${simpleTable(["Student", "Subject", "Tutor", "Status"], snapshot.unlinkedStatuses.map((s) => [s.student, s.subject, s.tutor, s.status || "No status"]))}` : ""}
-
 ${snapshot.lessonIssues.length ? `<h2>Tutor sheet issues</h2>${simpleTable(["Tutor", "Row", "Problem"], snapshot.lessonIssues.map((i) => [i.tutor, i.row, i.problem]))}` : ""}
 
 ${snapshot.issues.length ? `<h2>Clients tab issues</h2>${simpleTable(["Row", "Student", "Problem"], snapshot.issues.map((i) => [i.row, i.student, i.problem]))}` : ""}
