@@ -2,7 +2,7 @@
 // - Clients tab: all-time lessons delivered = column O (Total Maths) + column P (Total English).
 //   When a student switches tutors, lessons with the previous tutor are added to these by hand.
 // - Each tutor's "Sessions" tab (listed in the Tutors tab, column E): one dated row per lesson,
-//   used for the date-range views.
+//   used for the date-range views; and "Students" tab: each student's Status (ACTIVE/PAUSED/CANCELLED).
 
 import { MASTER_CLIENTS_GID, MASTER_SHEET_ID, TIMEZONE } from "./config.js";
 
@@ -114,48 +114,104 @@ async function fetchTutors(): Promise<{ name: string; sheetId: string }[]> {
   });
 }
 
-// Finds the gid of the "Sessions" tab from the sheet's public HTML view.
-async function findSessionsGid(sheetId: string): Promise<string> {
-  const html = await fetchText(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`);
-  const gid = html.match(/name: "Sessions", pageUrl: "[^"]*gid=(\d+)/)?.[1];
-  if (!gid) throw new Error(`No "Sessions" tab found in tutor sheet ${sheetId}`);
+// Finds a tab's gid from the sheet's public HTML view.
+function findTabGid(html: string, sheetId: string, tabName: string): string {
+  const gid = html.match(new RegExp(`name: "${tabName}", pageUrl: "[^"]*gid=(\\d+)`))?.[1];
+  if (!gid) throw new Error(`No "${tabName}" tab found in tutor sheet ${sheetId}`);
   return gid;
 }
 
-// Tutor "Sessions" columns: A date (dd/mm/yyyy), B student, C subject, D hours, ..., J parent email.
-export async function fetchLessons(): Promise<{ lessons: Lesson[]; issues: LessonIssue[] }> {
+// Index of the column whose header starts with `label` (case-insensitive), or `fallback` if not found.
+function column(header: string[], label: string, fallback: number): number {
+  const i = header.findIndex((h) => h.trim().toLowerCase().startsWith(label.toLowerCase()));
+  return i >= 0 ? i : fallback;
+}
+
+export type StatusValue = "ACTIVE" | "PAUSED" | "CANCELLED" | "";
+
+// One row of a tutor's Students tab. A row covers the subject(s) that tutor teaches the student.
+export interface StudentStatus {
+  tutor: string;
+  student: string;
+  parentEmail: string; // lowercased, may be empty
+  subjects: string[]; // "Maths" and/or "English"; empty if it can't be worked out
+  status: StatusValue;
+}
+
+// "General Maths", "Maths Methods" -> Maths; "QLD English", "Advanced English" -> English.
+function subjectsIn(text: string): string[] {
+  return [/math/i.test(text) ? "Maths" : "", /english/i.test(text) ? "English" : ""].filter(Boolean);
+}
+
+// Reads every tutor's Sessions tab (dated lessons) and Students tab (statuses). Columns are found by
+// their header names, so moving or adding columns in the tutor template doesn't break this.
+export async function fetchTutorSheets(): Promise<{ lessons: Lesson[]; statuses: StudentStatus[]; issues: LessonIssue[] }> {
   const tutors = await fetchTutors();
   const lessons: Lesson[] = [];
+  const statuses: StudentStatus[] = [];
   const issues: LessonIssue[] = [];
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE }).format(new Date());
 
   await Promise.all(tutors.map(async (tutor) => {
-    let rows: string[][];
+    let sessionRows: string[][], studentRows: string[][];
     try {
-      rows = parseCsv(await fetchText(csvUrl(tutor.sheetId, await findSessionsGid(tutor.sheetId))));
+      const html = await fetchText(`https://docs.google.com/spreadsheets/d/${tutor.sheetId}/htmlview`);
+      [sessionRows, studentRows] = await Promise.all(["Sessions", "Students"].map(async (tab) =>
+        parseCsv(await fetchText(csvUrl(tutor.sheetId, findTabGid(html, tutor.sheetId, tab))))));
     } catch (err) {
       issues.push({ tutor: tutor.name, row: "whole sheet", problem: err instanceof Error ? err.message : String(err) });
       return;
     }
-    const headerIdx = rows.findIndex((r) => r[0]?.startsWith("Date"));
-    for (const r of rows.slice(headerIdx + 1)) {
-      if (!r[0]?.trim()) continue;
-      const label = `${r[0]} ${r[1]} ${r[2]}`;
-      const date = toIsoDate(r[0]);
-      const hours = parseFloat(r[3]);
+
+    // Sessions: header row starts with "Date"
+    const sh = sessionRows.findIndex((r) => r[0]?.startsWith("Date"));
+    const sHeader = sessionRows[sh] ?? [];
+    const col = {
+      date: column(sHeader, "Date", 0), student: column(sHeader, "Student Name", 1), subject: column(sHeader, "Subject", 2),
+      hours: column(sHeader, "Lesson Length", 3), email: column(sHeader, "Parent Email", 9),
+    };
+    const tutorLessons: Lesson[] = [];
+    for (const r of sessionRows.slice(sh + 1)) {
+      if (!r[col.date]?.trim()) continue;
+      const label = `${r[col.date]} ${r[col.student]} ${r[col.subject]}`;
+      const date = toIsoDate(r[col.date]);
+      const hours = parseFloat(r[col.hours]);
       if (!date) { issues.push({ tutor: tutor.name, row: label, problem: "unreadable date" }); continue; }
       if (date > today) issues.push({ tutor: tutor.name, row: label, problem: "date is in the future" });
       if (!(hours > 0)) issues.push({ tutor: tutor.name, row: label, problem: "missing lesson length, assumed 1 hr" });
-      lessons.push({
+      tutorLessons.push({
         tutor: tutor.name,
         date,
-        student: (r[1] ?? "").trim(),
+        student: (r[col.student] ?? "").trim(),
         // Tutors log "Maths Methods", "General Maths" etc. - all count as Maths.
-        subject: /math/i.test(r[2] ?? "") ? "Maths" : (r[2] ?? "").trim(),
+        subject: /math/i.test(r[col.subject] ?? "") ? "Maths" : (r[col.subject] ?? "").trim(),
         hours: hours > 0 ? hours : 1,
-        parentEmail: (r[9] ?? "").trim().toLowerCase(),
+        parentEmail: (r[col.email] ?? "").trim().toLowerCase(),
       });
     }
+    lessons.push(...tutorLessons);
+
+    // Students: header row contains "Student Name"; Status is in the column headed "Status" (column A)
+    const th = studentRows.findIndex((r) => r.some((c) => c.trim() === "Student Name"));
+    if (th < 0) { issues.push({ tutor: tutor.name, row: "Students tab", problem: "no \"Student Name\" header found" }); return; }
+    const tHeader = studentRows[th];
+    const scol = {
+      status: tHeader.findIndex((h) => h.trim() === "Status"), name: column(tHeader, "Student Name", 1),
+      email: column(tHeader, "Parent Email", 5), subjects: column(tHeader, "Subjects", 7),
+    };
+    for (const r of studentRows.slice(th + 1)) {
+      const student = (r[scol.name] ?? "").trim();
+      if (!student) continue;
+      const raw = scol.status >= 0 ? (r[scol.status] ?? "").trim().toUpperCase() : "";
+      const status: StatusValue = raw === "ACTIVE" || raw === "PAUSED" || raw === "CANCELLED" ? raw : "";
+      // Subject from the Subjects column, else from what this tutor has logged for the student
+      let subjects = subjectsIn(r[scol.subjects] ?? "");
+      if (!subjects.length) {
+        const logged = tutorLessons.filter((l) => l.student.toLowerCase() === student.toLowerCase()).map((l) => l.subject);
+        subjects = subjectsIn(logged.join(" "));
+      }
+      statuses.push({ tutor: tutor.name, student, parentEmail: (r[scol.email] ?? "").trim().toLowerCase(), subjects, status });
+    }
   }));
-  return { lessons, issues };
+  return { lessons, statuses, issues };
 }

@@ -4,7 +4,7 @@
 import type { Account } from "./accounts.js";
 import type { BillingEvent } from "./billing.js";
 import { DATED_WEEKS, TIMEZONE } from "./config.js";
-import type { ClientIssue, Lesson, LessonIssue } from "./sheets.js";
+import type { ClientIssue, Lesson, LessonIssue, StudentStatus } from "./sheets.js";
 import { accountName, accountStudents, familyLessons, type Report } from "./report.js";
 
 export interface AccountRow {
@@ -25,8 +25,22 @@ export interface AccountRow {
   hasProgram: boolean;
   lessons: { student: string; maths: number; english: number; row: number }[]; // Clients tab totals
   dated: Pick<Lesson, "date" | "hours" | "tutor" | "student" | "subject">[]; // tutor-sheet lessons, for date ranges
+  statuses: StatusRow[]; // one per student, subject and tutor (from the tutors' Students tabs)
   events: Pick<BillingEvent, "date" | "kind" | "description" | "amount" | "hours">[];
 }
+
+export interface StatusRow {
+  student: string;
+  subject: string; // "Maths", "English" or "Unknown subject"
+  tutor: string;
+  status: StudentStatus["status"]; // "" = no status selected
+}
+
+// A Students-tab row covering both subjects becomes two status rows, one per subject.
+const statusRows = (list: StudentStatus[]): StatusRow[] =>
+  list.flatMap((s) => (s.subjects.length ? s.subjects : ["Unknown subject"]).map((subject) =>
+    ({ student: s.student, subject, tutor: s.tutor, status: s.status })))
+    .sort((a, b) => a.student.localeCompare(b.student) || a.subject.localeCompare(b.subject));
 
 export interface Snapshot {
   reconciledAt: string; // ISO timestamp
@@ -37,6 +51,7 @@ export interface Snapshot {
   unmatchedClients: { parentEmail: string; parent: string; students: string; lessons: number; suggestion: { name: string; email: string; id: string } | null }[];
   issues: ClientIssue[];
   unlinkedLessons: Pick<Lesson, "date" | "hours" | "tutor" | "student" | "subject" | "parentEmail">[];
+  unlinkedStatuses: StatusRow[]; // Students-tab rows not linked to a reconciled family
   lessonIssues: LessonIssue[];
 }
 
@@ -70,6 +85,7 @@ export function toSnapshot(report: Report): Snapshot {
       hasProgram: a.hasProgram,
       dated: (report.lessonsByAccount.get(a) ?? []).filter(inWindow).sort((x, y) => x.date.localeCompare(y.date))
         .map(({ date, hours, tutor, student, subject }) => ({ date, hours, tutor, student, subject })),
+      statuses: statusRows(report.statusesByAccount.get(a) ?? []),
       lessons: a.families.flatMap((f) => f.clients).map((c) => ({ student: c.studentName, maths: c.maths, english: c.english, row: c.row })),
       events: [...a.events].sort((x, y) => x.date.localeCompare(y.date))
         .map(({ date, kind, description, amount, hours }) => ({ date, kind, description, amount, hours })),
@@ -87,6 +103,7 @@ export function toSnapshot(report: Report): Snapshot {
     })),
     issues: report.issues,
     unlinkedLessons: report.unlinkedLessons.filter(inWindow).map(({ date, hours, tutor, student, subject, parentEmail }) => ({ date, hours, tutor, student, subject, parentEmail })),
+    unlinkedStatuses: statusRows(report.unlinkedStatuses),
     lessonIssues: report.lessonIssues,
   };
 }

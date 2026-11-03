@@ -21,7 +21,7 @@ export interface PageOptions {
 
 export function renderPage(saved: Snapshot | null, { canReconcile, error }: PageOptions): string {
   // A result saved by an older version of the app lacks the date-range fields: ask for a fresh reconcile.
-  const outdated = saved !== null && !saved.asOf;
+  const outdated = saved !== null && (!saved.asOf || (saved.accounts.length > 0 && !Array.isArray(saved.accounts[0].statuses)));
   const snapshot = outdated ? null : saved;
   const reconciled = saved
     ? new Date(saved.reconciledAt).toLocaleString("en-AU", { timeZone: TIMEZONE, weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })
@@ -89,6 +89,10 @@ table.events { font-size:13px; } table.events td, table.events th { padding:6px 
 .chip.ok { color:var(--ok); background:var(--ok-bg); } .chip.over { color:var(--over); background:var(--over-bg); }
 .chip.under { color:var(--under); background:var(--under-bg); } .chip.prepaid { color:var(--prepaid); background:var(--prepaid-bg); }
 .chip.blank { color:var(--blank); background:var(--blank-bg); }
+.statuses { display:flex; flex-wrap:wrap; gap:4px; }
+.chip.st-ACTIVE { color:var(--ok); background:var(--ok-bg); } .chip.st-PAUSED { color:var(--over); background:var(--over-bg); }
+.chip.st-CANCELLED { color:var(--under); background:var(--under-bg); } .chip.st-none { color:var(--blank); background:var(--blank-bg); }
+.warn { color:var(--under); font-size:12px; font-weight:600; margin-top:4px; }
 .empty { color:var(--muted); } .count { color:var(--muted); font-size:14px; margin:0 0 8px; }
 code { font-size:13px; background:var(--bg); padding:1px 4px; border-radius:4px; }
 </style></head>
@@ -117,6 +121,7 @@ Date ranges cover the ${DATED_WEEKS} weeks up to the last reconcile (${esc(snaps
 <div class="stats" id="stats"></div>
 <div class="toolbar">
   <input type="search" id="search" placeholder="Search student, parent or email" aria-label="Search">
+  <select id="studentFilter" aria-label="Filter by student status"></select>
   <select id="sort" aria-label="Sort by">
     <option value="gap">Biggest difference first</option>
     <option value="" hidden>Sorted by column</option>
@@ -133,8 +138,9 @@ Date ranges cover the ${DATED_WEEKS} weeks up to the last reconcile (${esc(snaps
 <p class="count" id="count"></p>
 <div class="scroll"><table id="accounts" data-tolerance-weeks="${TOLERANCE_WEEKS}" data-start-date="${esc(START_DATE)}" data-as-of="${esc(snapshot.asOf)}" data-dated-from="${esc(snapshot.datedFrom)}">
   <thead><tr>
-    <th data-sort="status">Status<span class="arrow"></span></th>
+    <th data-sort="status">Billing<span class="arrow"></span></th>
     <th data-sort="students">Family<span class="arrow"></span></th>
+    <th>Student status</th>
     <th class="num" data-sort="billed">Billed<span class="arrow"></span></th>
     <th class="num" data-sort="refunded">Refunded<span class="arrow"></span></th>
     <th class="num" data-sort="netBilled">Net billed<span class="arrow"></span></th>
@@ -179,6 +185,10 @@ ${snapshot.unmatchedClients.length ? `<div class="scroll"><table><thead><tr><th>
 ${snapshot.unlinkedLessons.length ? `<h2>Tutor-sheet lessons not linked to a family</h2>
 <p class="hint">These lessons aren't in any date-range view: their parent email and student name don't match a reconciled family in the Clients tab.</p>
 ${simpleTable(["Date", "Student", "Subject", "Tutor", "Hours", "Parent email"], snapshot.unlinkedLessons.map((l) => [l.date, l.student, l.subject, l.tutor, l.hours, l.parentEmail || "—"]))}` : ""}
+
+${(snapshot.unlinkedStatuses ?? []).length ? `<h2>Tutor-sheet students not linked to a family</h2>
+<p class="hint">In a tutor's Students tab, but their parent email and name don't match a reconciled family in the Clients tab.</p>
+${simpleTable(["Student", "Subject", "Tutor", "Status"], snapshot.unlinkedStatuses.map((s) => [s.student, s.subject, s.tutor, s.status || "No status"]))}` : ""}
 
 ${snapshot.lessonIssues.length ? `<h2>Tutor sheet issues</h2>${simpleTable(["Tutor", "Row", "Problem"], snapshot.lessonIssues.map((i) => [i.tutor, i.row, i.problem]))}` : ""}
 
@@ -242,7 +252,40 @@ ${canReconcile ? `<div class="banner" id="banner" hidden><span id="banner-text">
     ["OK", "OK", "ok"], ["all", "All families", ""],
   ];
   const CHIP = { "Overbilled": "over", "Underbilled": "under", "Prepaid program": "prepaid", "No lessons in Clients tab": "blank", "OK": "ok" };
-  const state = { period: "all", from: "", to: "", status: "attention", search: "", sort: "gap", dir: -1 };
+  const state = { period: "all", from: "", to: "", status: "attention", student: "all", search: "", sort: "gap", dir: -1 };
+
+  // Student statuses come from each tutor's Students tab: one per student, subject and tutor.
+  const LABEL = { ACTIVE: "Active", PAUSED: "Paused", CANCELLED: "Cancelled", "": "No status" };
+  const statusesOf = (a) => a.statuses || [];
+  const liveButNotActive = (a) => a.planHours > 0 && statusesOf(a).length > 0 &&
+    statusesOf(a).every((s) => s.status === "PAUSED" || s.status === "CANCELLED");
+  const STUDENT_FILTERS = [
+    ["all", "Any student status", () => true],
+    ["liveInactive", "Billing live, nothing active", liveButNotActive],
+    ["paused", "Has a paused subject", (a) => statusesOf(a).some((s) => s.status === "PAUSED")],
+    ["cancelled", "Has a cancelled subject", (a) => statusesOf(a).some((s) => s.status === "CANCELLED")],
+    ["missing", "Has a subject with no status", (a) => statusesOf(a).some((s) => s.status === "")],
+    ["active", "All subjects active", (a) => statusesOf(a).length > 0 && statusesOf(a).every((s) => s.status === "ACTIVE")],
+    ["none", "Not found in tutor sheets", (a) => statusesOf(a).length === 0],
+  ];
+  const studentFilter = document.getElementById("studentFilter");
+  studentFilter.innerHTML = STUDENT_FILTERS.map(([key, label]) =>
+    '<option value="' + key + '">' + label + (key === "all" ? "" : " (" + accounts.filter(STUDENT_FILTERS.find((f) => f[0] === key)[2]).length + ")") + "</option>").join("");
+  studentFilter.addEventListener("change", () => { state.student = studentFilter.value; render(); });
+
+  function statusCell(a) {
+    const list = statusesOf(a);
+    if (!list.length) return '<span class="chip st-none">Not in tutor sheets</span>';
+    const first = (s) => s.student.split(" ")[0].toLowerCase();
+    const siblings = new Set(list.map(first)).size > 1;
+    // Same student and subject with more than one tutor (e.g. after a tutor change): name the tutor
+    const repeated = (s) => list.filter((x) => first(x) === first(s) && x.subject === s.subject).length > 1;
+    return '<div class="statuses">' + list.map((s) =>
+      '<span class="chip st-' + (s.status || "none") + '" title="' + esc(s.student + " - " + s.tutor) + '">' +
+      (siblings ? esc(s.student.split(" ")[0]) + " " : "") + esc(s.subject) + (repeated(s) ? " (" + esc(s.tutor) + ")" : "") +
+      ": " + LABEL[s.status] + "</span>").join("") + "</div>" +
+      (liveButNotActive(a) ? '<div class="warn">Billing live, nothing active</div>' : "");
+  }
 
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const round = (n) => Math.round(n * 100) / 100;
@@ -357,7 +400,12 @@ ${canReconcile ? `<div class="banner" id="banner" hidden><span id="banner-text">
           '</td><td class="num">' + money(e.amount) + '</td><td class="num">' + (e.hours === null ? "<em>needs review</em>" : hrs(e.hours)) + "</td></tr>").join("") +
         "</tbody></table></div>"
       : '<p class="empty">None.</p>';
-    return lessons +
+    const statusTable = statusesOf(a).length
+      ? '<p><strong>Student status (tutor sheets):</strong></p><div class="scroll"><table class="events"><thead><tr><th>Student</th><th>Subject</th><th>Tutor</th><th>Status</th></tr></thead><tbody>' +
+        statusesOf(a).map((s) => "<tr><td>" + esc(s.student) + "</td><td>" + esc(s.subject) + "</td><td>" + esc(s.tutor) +
+          '</td><td><span class="chip st-' + (s.status || "none") + '">' + LABEL[s.status] + "</span></td></tr>").join("") + "</tbody></table></div>"
+      : '<p><strong>Student status:</strong> not found in any tutor&#39;s Students tab.</p>';
+    return statusTable + lessons +
       "<p><strong>Parent email:</strong> " + esc(a.parentEmails || "—") + " · <strong>Stripe:</strong> " + esc(a.stripeNames) + "</p>" +
       "<p><strong>Plan:</strong> " + (a.planHours ? hrs(a.planHours) + " hrs/week" : "no live subscription") +
       (a.unconverted ? " · <strong>" + money(a.unconverted) + "</strong> couldn't be converted to hours" : "") + "</p>" +
@@ -385,18 +433,20 @@ ${canReconcile ? `<div class="banner" id="banner" hidden><span id="banner-text">
 
     const rows = views
       .filter((a) => matchesStatus(a, state.status))
+      .filter(STUDENT_FILTERS.find((f) => f[0] === state.student)[2])
       .filter((a) => !state.search || (a.students + " " + a.stripeNames + " " + a.parentEmails).toLowerCase().includes(state.search))
       .sort(compare);
     table.querySelector("tbody").innerHTML = rows.length ? rows.map((a) =>
       '<tr class="account" tabindex="0">' +
       '<td><span class="chip ' + CHIP[a.status] + '">' + esc(a.status) + "</span></td>" +
       "<td><strong>" + esc(a.students) + '</strong><div class="sub">' + esc(a.stripeNames) + "</div></td>" +
+      "<td>" + statusCell(a) + "</td>" +
       '<td class="num">' + hrs(a.billed) + '</td><td class="num">' + hrs(a.refunded) + '</td>' +
       '<td class="num strong">' + hrs(a.netBilled) + '</td><td class="num">' + hrs(a.delivered) + '</td>' +
       '<td class="num strong">' + signed(a.balance) + '</td><td class="num">' + money(a.dollars) + "</td>" +
       "<td>" + esc(a.lastBilled || "—") + "</td></tr>" +
-      '<tr class="detail" hidden><td colspan="9">' + detail(a) + "</td></tr>").join("")
-      : '<tr><td colspan="9" class="empty">No families match.</td></tr>';
+      '<tr class="detail" hidden><td colspan="10">' + detail(a) + "</td></tr>").join("")
+      : '<tr><td colspan="10" class="empty">No families match.</td></tr>';
     document.getElementById("count").textContent = rows.length + " of " + accounts.length + " families";
     table.querySelectorAll("th[data-sort]").forEach((th) => {
       th.querySelector(".arrow").textContent = th.dataset.sort === state.sort ? (state.dir === 1 ? " ▲" : " ▼") : "";
