@@ -16,6 +16,11 @@ Internal admin tooling for the tutoring business. The owner is new to coding: ex
 - `src/accounts.ts`: totals per account. Net billed = billed − refunded/credited; balance = net billed − delivered. Positive = paid for lessons not yet had.
 - `src/report.ts` builds the report; `src/snapshot.ts` turns it into plain JSON for saving; `src/html.ts` renders a snapshot (shared by the CLI and the website).
 
+## Master sheet Apps Script (`apps-script/`, pasted into the master sheet's project by the owner)
+- `StripeLinks.gs`: web app behind the Confirm/Ignore buttons.
+- `TemplateCheck.gs`: read-only inventory of every tutor sheet and the Clients O/P formulas → "Template Check" tab.
+- `TutorMigration.gs`: one-off move of all tutor sheets to the new Students layout (Status, Name, Year, State, Parent Name, Parent Email, Phone, Subjects, Tutor, Maths, English, Other, Total, Most Recent), Clients O/P → `Students!F:J`/`F:K`, and per-sheet onEdit triggers (`tutorStudentsOnEdit`). Preview first; backs up each file to Drive before changing it.
+
 ## Rules
 - Stripe access is **read-only**. Never write to Stripe. The only sheet write is adding/replacing rows in the Stripe Links tab, via the Apps Script web app in `apps-script/StripeLinks.gs` (bound to the master sheet, checks a shared secret), called by `api/links.ts` for the Confirm/Ignore buttons.
 - `out/` and `data/` contain children's and parents' personal data. They are gitignored; never commit them or publish them anywhere.
